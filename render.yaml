@@ -8,7 +8,7 @@ services:
     region: frankfurt
     # preDeployCommand requires a paid plan, so migrations run as part of the build instead.
     buildCommand: pip install -r requirements.txt && alembic upgrade head
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-server-header
     # /ready checks the database, so a deploy that can't reach it never receives traffic.
     healthCheckPath: /api/v1/ready
     envVars:

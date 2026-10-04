@@ -1,6 +1,8 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import AccountEditor from "../components/AccountEditor";
 import HealthMetricsPanel from "../components/HealthMetricsPanel";
+import MeasurementLogCard from "../components/MeasurementLogCard";
 import { useAuth, type User } from "../context/AuthContext";
 import { api } from "../lib/api";
 
@@ -51,44 +53,52 @@ function toList(value: string): string[] {
     .filter(Boolean);
 }
 
+function ageFrom(dob: string): number {
+  const birth = new Date(dob);
+  const today = new Date();
+  const hadBirthday =
+    today.getMonth() > birth.getMonth() ||
+    (today.getMonth() === birth.getMonth() && today.getDate() >= birth.getDate());
+  return today.getFullYear() - birth.getFullYear() - (hadBirthday ? 0 : 1);
+}
+
 function AccountCard({ user }: { user: User }) {
+  const [editing, setEditing] = useState(false);
+  const profile = user.role === "coach" ? user.coach : user.customer;
+  const rows: [string, string][] = [
+    ["Name", user.full_name],
+    ["Email", user.email],
+    ["Role", user.role === "coach" ? "Coach" : "Customer"],
+    ["Gender", profile?.gender ? profile.gender[0].toUpperCase() + profile.gender.slice(1) : "—"],
+    [
+      "Date of birth",
+      profile?.date_of_birth ? new Date(profile.date_of_birth).toLocaleDateString() : "—",
+    ],
+    ["Age", profile?.date_of_birth ? String(ageFrom(profile.date_of_birth)) : "—"],
+  ];
+
   return (
     <div className="card">
-      <h2 className="font-semibold">Account</h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="font-semibold">Account</h2>
+        <button type="button" className="btn-soft btn-sm" onClick={() => setEditing(true)}>
+          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4 12.5-12.5z" />
+          </svg>
+          Edit details
+        </button>
+      </div>
       <dl className="mt-3 space-y-2 text-sm">
-        <div className="flex justify-between gap-4">
-          <dt className="text-slate-500">Name</dt>
-          <dd className="font-medium">{user.full_name}</dd>
-        </div>
-        <div className="flex justify-between gap-4">
-          <dt className="text-slate-500">Email</dt>
-          <dd className="truncate font-medium">{user.email}</dd>
-        </div>
-        <div className="flex justify-between gap-4">
-          <dt className="text-slate-500">Role</dt>
-          <dd className="font-medium capitalize">{user.role}</dd>
-        </div>
-        {user.customer?.gender && (
-          <div className="flex justify-between gap-4">
-            <dt className="text-slate-500">Gender</dt>
-            <dd className="font-medium capitalize">{user.customer.gender}</dd>
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex justify-between gap-4">
+            <dt className="shrink-0 text-slate-500">{label}</dt>
+            <dd className="min-w-0 truncate text-right font-medium" title={value}>
+              {value}
+            </dd>
           </div>
-        )}
-        {user.customer?.date_of_birth && (
-          <>
-            <div className="flex justify-between gap-4">
-              <dt className="text-slate-500">Date of birth</dt>
-              <dd className="font-medium">
-                {new Date(user.customer.date_of_birth).toLocaleDateString()}
-              </dd>
-            </div>
-            <div className="flex justify-between gap-4">
-              <dt className="text-slate-500">Age</dt>
-              <dd className="font-medium">{user.customer.age}</dd>
-            </div>
-          </>
-        )}
+        ))}
       </dl>
+      {editing && <AccountEditor user={user} onClose={() => setEditing(false)} />}
     </div>
   );
 }
@@ -433,35 +443,45 @@ function CustomerForm({ user }: { user: User }) {
 
       <aside className="space-y-4">
         <AccountCard user={user} />
-        <div className="card">
-          <h2 className="font-semibold">Your share code</h2>
-          <p className="mt-1 text-sm text-slate-600">
-            Give this to a coach so they can add you. Only share it with someone you want to see
-            your health data.
-          </p>
-          <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-center font-mono text-xl tracking-widest text-slate-900">
-            {user.customer?.share_code ?? "—"}
-          </p>
-          {user.customer?.coach_id && (
-            <p className="mt-2 text-xs text-emerald-600">You&apos;re already linked to a coach.</p>
-          )}
-        </div>
+        {/* Only needed until a coach links the customer; reappears if the coach removes them. */}
+        {!user.customer?.coach_id && (
+          <div className="card">
+            <h2 className="font-semibold">Your share code</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Give this to a coach so they can add you. Only share it with someone you want to see
+              your health data.
+            </p>
+            <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-center font-mono text-xl tracking-widest text-slate-900">
+              {user.customer?.share_code ?? "—"}
+            </p>
+          </div>
+        )}
       </aside>
     </>
   );
 }
 
 export default function ProfilePage() {
-  const { user } = useAuth();
+  const { user, setUser } = useAuth();
+
+  // Pick up changes made by others since login, such as a coach adding or removing this customer.
+  useEffect(() => {
+    api
+      .get<User>("/auth/me")
+      .then(setUser)
+      .catch(() => undefined);
+  }, [setUser]);
+
   if (!user) return null;
 
   const isCoach = user.role === "coach";
   const isFirstTime = !user.profile_completed;
+  const c = user.customer;
 
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-3xl font-bold">
+        <h1 className="text-2xl font-bold sm:text-3xl">
           {isFirstTime ? `Welcome, ${user.full_name}!` : "Your profile"}
         </h1>
         <p className="mt-1 text-slate-600">
@@ -484,9 +504,15 @@ export default function ProfilePage() {
             </aside>
           </>
         ) : (
-          <CustomerForm user={user} />
+          // Remount when logged measurements change so the form never saves stale values.
+          <CustomerForm
+            key={[c?.weight_kg, c?.height_cm, c?.waist_cm, c?.neck_cm, c?.hip_cm].join("|")}
+            user={user}
+          />
         )}
       </div>
+
+      {!isCoach && !isFirstTime && <MeasurementLogCard />}
 
       {!isCoach && (
         <section className="card">

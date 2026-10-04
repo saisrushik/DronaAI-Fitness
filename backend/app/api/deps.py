@@ -4,7 +4,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload
 
 from app.core.config import settings
 from app.core.security import decode_token
@@ -43,7 +43,7 @@ async def get_current_user(
     result = await db.execute(
         select(User)
         .where(User.id == user_id)
-        .options(selectinload(User.coach), selectinload(User.customer))
+        .options(joinedload(User.coach), joinedload(User.customer))
     )
     user = result.scalar_one_or_none()
     if user is None:

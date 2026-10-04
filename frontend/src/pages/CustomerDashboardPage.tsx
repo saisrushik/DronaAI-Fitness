@@ -23,6 +23,7 @@ export interface CustomerSummary {
   bmi: number | null;
   workout_plan_count: number;
   diet_plan_count: number;
+  pending_requests: number;
 }
 
 const goalLabels: Record<string, string> = {
@@ -90,7 +91,7 @@ export default function CustomerDashboardPage() {
   return (
     <div className="space-y-8">
       <header>
-        <h1 className="text-3xl font-bold">My customers</h1>
+        <h1 className="text-2xl font-bold sm:text-3xl">My customers</h1>
         <p className="mt-1 text-slate-600">
           Everyone you train, their metrics, and the plans you&apos;ve built for them.
         </p>
@@ -113,7 +114,7 @@ export default function CustomerDashboardPage() {
           <input
             value={shareCode}
             onChange={(e) => setShareCode(e.target.value)}
-            className="input max-w-xs font-mono uppercase tracking-widest"
+            className="input flex-1 font-mono uppercase tracking-widest sm:max-w-xs sm:flex-none"
             placeholder="ABCD1234"
             maxLength={12}
             required
@@ -137,12 +138,12 @@ export default function CustomerDashboardPage() {
             {customers.map((customer) => (
               <article key={customer.id} className="card">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h3 className="font-semibold text-slate-900">{customer.full_name}</h3>
-                    <p className="text-sm text-slate-500">{customer.email}</p>
+                  <div className="min-w-0">
+                    <h3 className="break-words font-semibold text-slate-900">{customer.full_name}</h3>
+                    <p className="truncate text-sm text-slate-500">{customer.email}</p>
                   </div>
                   {customer.primary_goal && (
-                    <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
+                    <span className="shrink-0 rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
                       {goalLabels[customer.primary_goal] ?? customer.primary_goal}
                     </span>
                   )}
@@ -169,9 +170,18 @@ export default function CustomerDashboardPage() {
                   </p>
                 )}
 
-                <div className="mt-4 flex items-center justify-between">
-                  <span className="text-sm text-slate-500">
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                  <span className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
                     {customer.workout_plan_count} workout · {customer.diet_plan_count} diet
+                    {customer.pending_requests > 0 && (
+                      <Link
+                        to="/requests"
+                        className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 hover:bg-amber-200"
+                      >
+                        {customer.pending_requests} pending request
+                        {customer.pending_requests === 1 ? "" : "s"}
+                      </Link>
+                    )}
                   </span>
                   <Link to={`/customers/${customer.id}`} className="btn-primary">
                     Open

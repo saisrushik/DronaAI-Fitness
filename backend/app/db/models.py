@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    UniqueConstraint,
     Uuid,
     func,
 )
@@ -65,6 +66,8 @@ class Coach(Base):
     specialization: Mapped[str | None] = mapped_column(String(120))
     years_experience: Mapped[int | None] = mapped_column(Integer)
     bio: Mapped[str | None] = mapped_column(String(500))
+    gender: Mapped[str | None] = mapped_column(String(20))
+    date_of_birth: Mapped[date | None] = mapped_column(Date)
     profile_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     user: Mapped[User] = relationship(back_populates="coach")
@@ -112,6 +115,12 @@ class Customer(Base):
     plans: Mapped[list["WorkoutDietPlan"]] = relationship(
         back_populates="customer", cascade="all, delete-orphan"
     )
+    requests: Mapped[list["CustomerRequest"]] = relationship(
+        back_populates="customer", cascade="all, delete-orphan"
+    )
+    measurements: Mapped[list["BodyMeasurement"]] = relationship(
+        back_populates="customer", cascade="all, delete-orphan"
+    )
 
     @property
     def age(self) -> int | None:
@@ -151,4 +160,113 @@ class WorkoutDietPlan(Base):
     customer: Mapped[Customer] = relationship(back_populates="plans")
 
 
-__all__ = ["Base", "Coach", "Customer", "User", "WorkoutDietPlan"]
+class CustomerRequest(Base):
+    """Something a customer asks of their coach: a meal swap, workout change, injury or question."""
+
+    __tablename__ = "customer_requests"
+
+    id: Mapped[uuid.UUID] = _pk()
+    customer_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    coach_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("coaches.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    # Only meal requests point at a plan.
+    plan_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workout_diet_plans.id", ondelete="CASCADE"), index=True
+    )
+
+    request_type: Mapped[str] = mapped_column(String(10), nullable=False)  # meal|workout|injury|query
+    status: Mapped[str] = mapped_column(String(10), nullable=False, default="pending")
+    description: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
+    # Meal requests: [{"day", "session", "items": ["food name", ...]}]
+    requested_meals: Mapped[list | None] = mapped_column(JsonList)
+    # Same shape, but each item carries quantity, calories and macros set by the coach.
+    approved_meals: Mapped[list | None] = mapped_column(JsonList)
+    coach_note: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    customer: Mapped[Customer] = relationship(back_populates="requests")
+    plan: Mapped[WorkoutDietPlan | None] = relationship()
+
+
+class BodyMeasurement(Base):
+    """One logged set of body measurements. Fields the customer didn't measure stay empty."""
+
+    __tablename__ = "body_measurements"
+
+    id: Mapped[uuid.UUID] = _pk()
+    customer_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    weight_kg: Mapped[float | None] = mapped_column(Float)
+    height_cm: Mapped[float | None] = mapped_column(Float)
+    waist_cm: Mapped[float | None] = mapped_column(Float)
+    neck_cm: Mapped[float | None] = mapped_column(Float)
+    hip_cm: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    customer: Mapped[Customer] = relationship(back_populates="measurements")
+
+
+class ProgressLog(Base):
+    """A customer's daily check-in: workout done, meals eaten and how they felt."""
+
+    __tablename__ = "progress_logs"
+    __table_args__ = (UniqueConstraint("customer_id", "log_date"),)
+
+    id: Mapped[uuid.UUID] = _pk()
+    customer_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    log_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # {"completed", "plan_day", "exercises": [{"name", "sets", "reps", "weight_kg"}]}
+    workout: Mapped[dict | None] = mapped_column(JsonList)
+    # [{"session", "status": "followed" | "other" | "skipped", "note"}]
+    meals: Mapped[list | None] = mapped_column(JsonList)
+    mood: Mapped[int | None] = mapped_column(Integer)
+    energy: Mapped[int | None] = mapped_column(Integer)
+    soreness: Mapped[int | None] = mapped_column(Integer)
+    sleep_hours: Mapped[float | None] = mapped_column(Float)
+    notes: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id: Mapped[uuid.UUID] = _pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    request_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("customer_requests.id", ondelete="CASCADE")
+    )
+    message: Mapped[str] = mapped_column(String(300), nullable=False)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+__all__ = [
+    "Base",
+    "BodyMeasurement",
+    "Coach",
+    "Customer",
+    "CustomerRequest",
+    "Notification",
+    "ProgressLog",
+    "User",
+    "WorkoutDietPlan",
+]

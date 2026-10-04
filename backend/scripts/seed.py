@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.core.security import generate_share_code, hash_password
 from app.db.models import Coach, Customer, User, WorkoutDietPlan
 from app.db.session import AsyncSessionLocal
+from app.services.measurements import body_values, measurement_from
 from app.services.plan_generator import generate_diet_plan, generate_workout_plan
 
 PASSWORD = "Password123!"
@@ -196,6 +197,9 @@ async def seed() -> None:
             )
             db.add(customer)
             await db.flush()
+            first = measurement_from(customer, body_values(customer))
+            if first is not None:
+                db.add(first)
             print(f"cust   {data['email']} -> {data['coach_email'] or 'no coach'} "
                   f"(code {customer.share_code})")
 

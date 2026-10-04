@@ -297,12 +297,12 @@ export default function RegisterPage() {
           </button>
         </form>
 
-        <p className="mt-6 text-center text-sm text-slate-600">
-          Already have an account?{" "}
-          <Link to="/login" className="font-medium text-indigo-600 hover:underline">
+        <div className="mt-6 space-y-2 border-t border-slate-100 pt-5 text-center">
+          <p className="text-sm text-slate-600">Already have an account?</p>
+          <Link to="/login" className="btn-secondary w-full">
             Log in
           </Link>
-        </p>
+        </div>
       </div>
     </div>
   );

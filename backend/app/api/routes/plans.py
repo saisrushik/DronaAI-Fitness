@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload
 
 from app.api.deps import get_current_customer
 from app.db.models import Coach, Customer, WorkoutDietPlan
@@ -66,7 +66,7 @@ async def my_coach(
         return None
 
     result = await db.execute(
-        select(Coach).where(Coach.id == customer.coach_id).options(selectinload(Coach.user))
+        select(Coach).where(Coach.id == customer.coach_id).options(joinedload(Coach.user))
     )
     coach = result.scalar_one()
     return {
@@ -74,4 +74,5 @@ async def my_coach(
         "email": coach.user.email,
         "specialization": coach.specialization,
         "years_experience": coach.years_experience,
+        "bio": coach.bio,
     }

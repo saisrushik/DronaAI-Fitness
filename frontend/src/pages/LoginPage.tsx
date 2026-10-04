@@ -15,12 +15,8 @@ export default function LoginPage() {
     setError("");
     setSubmitting(true);
     try {
-      const user = await login({ email, password });
-      if (!user.profile_completed) {
-        navigate("/profile", { replace: true });
-      } else {
-        navigate(user.role === "coach" ? "/customers" : "/workout-plan", { replace: true });
-      }
+      await login({ email, password });
+      navigate("/profile", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
@@ -72,12 +68,12 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <p className="mt-6 text-center text-sm text-slate-600">
-          New here?{" "}
-          <Link to="/register" className="font-medium text-indigo-600 hover:underline">
+        <div className="mt-6 space-y-2 border-t border-slate-100 pt-5 text-center">
+          <p className="text-sm text-slate-600">New here?</p>
+          <Link to="/register" className="btn-secondary w-full">
             Create an account
           </Link>
-        </p>
+        </div>
       </div>
     </div>
   );

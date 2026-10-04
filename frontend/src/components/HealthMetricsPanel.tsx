@@ -12,9 +12,9 @@ function Tile({
   hint?: string;
 }) {
   return (
-    <div className="rounded-xl bg-slate-50 p-4" title={hint}>
+    <div className="min-w-0 rounded-xl bg-slate-50 p-4" title={hint}>
       <p className="text-xs uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-1 text-2xl font-bold text-slate-900">{value}</p>
+      <p className="mt-1 break-words text-xl font-bold text-slate-900 sm:text-2xl">{value}</p>
       {sub && <p className="mt-0.5 text-xs text-slate-500">{sub}</p>}
     </div>
   );
@@ -29,7 +29,7 @@ export default function HealthMetricsPanel({ metrics }: { metrics: HealthMetrics
         <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
           Body composition
         </h3>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <Tile
             label="BMI"
             value={bmi.value}
@@ -55,7 +55,7 @@ export default function HealthMetricsPanel({ metrics }: { metrics: HealthMetrics
         <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
           Energy & macros
         </h3>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <Tile
             label="BMR"
             value={`${metrics.bmr} kcal`}

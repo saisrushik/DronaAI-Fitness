@@ -1,5 +1,7 @@
 """Rule-based plan generation. The AI agent layer will replace this later."""
 
+import copy
+
 from app.db.models import Customer
 from app.services.calculator import calculate_targets
 from app.services.food_catalog import (
@@ -214,3 +216,80 @@ def generate_diet_plan(customer: Customer) -> dict:
         "notes": f"7-day {style.replace('_', ' ')} plan at roughly {calories} kcal per day"
         + (f", avoiding: {avoided}." if avoided else "."),
     }
+
+
+def find_meal(content: dict, day: str, session: str) -> dict | None:
+    for plan_day in content.get("days", []):
+        if plan_day["day"] == day:
+            return next((s for s in plan_day["sessions"] if s["name"] == session), None)
+    return None
+
+
+def _food_key(name: str) -> str:
+    return name.strip().lower()
+
+
+def meal_diff(current_items: list[dict], wanted: list[str]) -> tuple[list[dict], list[str], list[str]]:
+    """Splits a requested food list into kept items (with nutrition), added names and removed names."""
+    current = {_food_key(item["name"]): item for item in current_items}
+    wanted_keys = {_food_key(name) for name in wanted}
+
+    kept: list[dict] = []
+    added: list[str] = []
+    seen: set[str] = set()
+    for name in wanted:
+        key = _food_key(name)
+        if key in seen:
+            continue
+        seen.add(key)
+        if key in current:
+            kept.append(current[key])
+        else:
+            added.append(name)
+    removed = [item["name"] for item in current_items if _food_key(item["name"]) not in wanted_keys]
+    return kept, added, removed
+
+
+def _recalculate(content: dict) -> None:
+    week_totals = _empty_totals()
+    for plan_day in content["days"]:
+        day_totals = _empty_totals()
+        for session in plan_day["sessions"]:
+            _add(day_totals, session["totals"])
+        plan_day["totals"] = _rounded(day_totals)
+        _add(week_totals, day_totals)
+
+    content["weekly_totals"] = _rounded(week_totals)
+    content["daily_average"] = _rounded(
+        {k: v / max(1, len(content["days"])) for k, v in week_totals.items()}
+    )
+
+
+def apply_meal_changes(content: dict, meals: list[dict], option: str = "Your choice") -> dict:
+    """Returns a copy of a diet plan with the given meals replaced and every total recalculated."""
+    updated = copy.deepcopy(content)
+    for meal in meals:
+        session = find_meal(updated, meal["day"], meal["session"])
+        if session is None:
+            raise ValueError(f"{meal['day']} {meal['session']} is not in this plan")
+        totals = _empty_totals()
+        for item in meal["items"]:
+            _add(totals, item)
+        session["items"] = [{**item, **_rounded(item)} for item in meal["items"]]
+        session["option"] = option
+        session["totals"] = _rounded(totals)
+
+    _recalculate(updated)
+    return updated
+
+
+def remove_meal(content: dict, day: str, session: str) -> dict:
+    """Returns a copy of a diet plan without the given meal, with totals recalculated."""
+    if find_meal(content, day, session) is None:
+        raise ValueError(f"{day} {session} is not in this plan")
+    updated = copy.deepcopy(content)
+    for plan_day in updated["days"]:
+        if plan_day["day"] == day:
+            plan_day["sessions"] = [s for s in plan_day["sessions"] if s["name"] != session]
+    _recalculate(updated)
+    return updated

@@ -31,15 +31,15 @@ export default function LandingPage() {
   const homeLink = user?.role === "coach" ? "/customers" : "/workout-plan";
 
   return (
-    <div className="space-y-16">
-      <section className="rounded-3xl bg-gradient-to-br from-indigo-600 to-violet-600 px-6 py-16 text-center text-white sm:px-12">
-        <p className="text-sm font-semibold uppercase tracking-widest text-indigo-200">
+    <div className="space-y-12 sm:space-y-16">
+      <section className="rounded-3xl bg-gradient-to-br from-indigo-600 to-violet-600 px-5 py-12 text-center text-white sm:px-12 sm:py-16">
+        <p className="text-xs font-semibold uppercase tracking-widest text-indigo-200 sm:text-sm">
           AI-powered fitness
         </p>
-        <h1 className="mx-auto mt-4 max-w-3xl text-4xl font-bold sm:text-5xl">
+        <h1 className="mx-auto mt-4 max-w-3xl text-3xl font-bold leading-tight sm:text-4xl lg:text-5xl">
           Your personal trainer and nutritionist, powered by AI
         </h1>
-        <p className="mx-auto mt-4 max-w-2xl text-lg text-indigo-100">
+        <p className="mx-auto mt-4 max-w-2xl text-base text-indigo-100 sm:text-lg">
           Personalized workout and diet plans built from your body, your goals and your daily
           routine — explained, safe and always adapting.
         </p>
@@ -71,8 +71,8 @@ export default function LandingPage() {
       </section>
 
       <section>
-        <h2 className="text-center text-3xl font-bold">Everything you need to stay on track</h2>
-        <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <h2 className="text-center text-2xl font-bold sm:text-3xl">Everything you need to stay on track</h2>
+        <div className="mt-6 grid gap-4 sm:mt-8 sm:grid-cols-2 sm:gap-5 lg:grid-cols-4">
           {features.map((feature) => (
             <article key={feature.title} className="card transition hover:-translate-y-1 hover:shadow-md">
               <h3 className="font-semibold text-slate-900">{feature.title}</h3>
@@ -83,8 +83,8 @@ export default function LandingPage() {
       </section>
 
       <section>
-        <h2 className="text-center text-3xl font-bold">How it works</h2>
-        <div className="mt-8 grid gap-5 md:grid-cols-3">
+        <h2 className="text-center text-2xl font-bold sm:text-3xl">How it works</h2>
+        <div className="mt-6 grid gap-4 sm:mt-8 sm:gap-5 md:grid-cols-3">
           {steps.map((item) => (
             <article key={item.step} className="card text-center">
               <span className="mx-auto grid h-11 w-11 place-items-center rounded-full bg-indigo-600 text-lg font-bold text-white">

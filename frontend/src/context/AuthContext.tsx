@@ -28,6 +28,8 @@ export interface CoachProfile {
   specialization: string | null;
   years_experience: number | null;
   bio: string | null;
+  gender: string | null;
+  date_of_birth: string | null;
   profile_completed: boolean;
 }
 

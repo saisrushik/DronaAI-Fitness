@@ -11,6 +11,8 @@ Thumbs.db
 .env.*
 !.env.example
 !.env.*.example
+passwords.md
+bugs.md
 
 # --- Python ---
 __pycache__/

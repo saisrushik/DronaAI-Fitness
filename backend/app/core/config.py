@@ -52,6 +52,8 @@ class Settings(BaseSettings):
         for name in ("DATABASE_URL", "DATABASE_URL_SYNC", "BACKEND_CORS_ORIGINS"):
             if any(host in getattr(self, name) for host in LOCAL_HOSTS):
                 problems.append(f"{name} must not point at localhost")
+        if not self.cors_origins or any(not o.startswith("https://") for o in self.cors_origins):
+            problems.append("BACKEND_CORS_ORIGINS must list explicit https:// origins (no *)")
         if "ssl=require" not in self.DATABASE_URL:
             problems.append("DATABASE_URL must end with ?ssl=require")
         if "sslmode=require" not in self.DATABASE_URL_SYNC:

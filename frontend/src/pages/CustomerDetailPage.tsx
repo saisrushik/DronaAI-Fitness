@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import CoachMealEditor from "../components/CoachMealEditor";
 import HealthMetricsPanel from "../components/HealthMetricsPanel";
 import PlanCard, { type Plan } from "../components/PlanCard";
+import type { DietSession } from "../components/WeeklyDietPlan";
 import type { HealthMetrics } from "../context/AuthContext";
 import { api } from "../lib/api";
 import type { CustomerSummary } from "./CustomerDashboardPage";
@@ -30,17 +32,24 @@ const labels: Record<string, string> = {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between gap-4 py-2 text-sm">
-      <dt className="text-slate-500">{label}</dt>
-      <dd className="text-right font-medium text-slate-800">{value}</dd>
+      <dt className="shrink-0 text-slate-500">{label}</dt>
+      <dd className="min-w-0 break-words text-right font-medium text-slate-800">{value}</dd>
     </div>
   );
 }
 
 export default function CustomerDetailPage() {
   const { customerId } = useParams();
+  const navigate = useNavigate();
   const [customer, setCustomer] = useState<CustomerDetail | null>(null);
   const [error, setError] = useState("");
   const [generating, setGenerating] = useState<"workout" | "diet" | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const [editingMeal, setEditingMeal] = useState<{
+    plan: Plan;
+    day: string;
+    session: DietSession;
+  } | null>(null);
 
   const load = () =>
     api
@@ -68,18 +77,38 @@ export default function CustomerDetailPage() {
   if (error && !customer) return <p className="py-20 text-center text-red-600">{error}</p>;
   if (!customer) return <p className="py-20 text-center text-slate-500">Loading…</p>;
 
+  const remove = async () => {
+    const confirmed = window.confirm(
+      `Remove ${customer.full_name} from your roster? You'll lose access to their data and ` +
+        "any pending requests will be closed. They can share their code with you again later.",
+    );
+    if (!confirmed) return;
+    setError("");
+    setRemoving(true);
+    try {
+      await api.post(`/coach/customers/${customerId}/remove`);
+      navigate("/customers", { replace: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not remove this customer");
+      setRemoving(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <Link to="/customers" className="text-sm text-indigo-600 hover:underline">
-        ← Back to my customers
+      <Link to="/customers" className="btn-secondary">
+        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 18l-6-6 6-6" />
+        </svg>
+        Back to my customers
       </Link>
 
       <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold">{customer.full_name}</h1>
-          <p className="mt-1 text-slate-600">{customer.email}</p>
+        <div className="min-w-0">
+          <h1 className="break-words text-2xl font-bold sm:text-3xl">{customer.full_name}</h1>
+          <p className="mt-1 break-all text-slate-600">{customer.email}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
           <button
             onClick={() => generate("workout")}
             className="btn-primary"
@@ -93,6 +122,13 @@ export default function CustomerDetailPage() {
             disabled={!customer.profile_completed || generating !== null}
           >
             {generating === "diet" ? "Generating…" : "Generate diet plan"}
+          </button>
+          <button
+            onClick={remove}
+            className="btn border border-red-200 bg-white text-red-600 hover:bg-red-50"
+            disabled={removing}
+          >
+            {removing ? "Removing…" : "Remove customer"}
           </button>
         </div>
       </header>
@@ -151,6 +187,17 @@ export default function CustomerDetailPage() {
         </div>
       </div>
 
+      {customer.pending_requests > 0 && (
+        <Link
+          to="/requests"
+          className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900 hover:bg-amber-100"
+        >
+          {customer.full_name} has {customer.pending_requests} pending request
+          {customer.pending_requests === 1 ? "" : "s"}
+          <span aria-hidden>&rarr;</span>
+        </Link>
+      )}
+
       <section className="space-y-4">
         <h2 className="text-xl font-semibold">Plans ({customer.plans.length})</h2>
         {customer.plans.length === 0 ? (
@@ -158,9 +205,29 @@ export default function CustomerDetailPage() {
             No plans yet. Use the buttons above to generate one.
           </p>
         ) : (
-          customer.plans.map((plan) => <PlanCard key={plan.id} plan={plan} />)
+          customer.plans.map((plan) => (
+            <PlanCard
+              key={plan.id}
+              plan={plan}
+              onManageMeal={
+                plan.plan_type === "diet"
+                  ? (day, session) => setEditingMeal({ plan, day, session })
+                  : undefined
+              }
+            />
+          ))
         )}
       </section>
+
+      {editingMeal && (
+        <CoachMealEditor
+          plan={editingMeal.plan}
+          day={editingMeal.day}
+          session={editingMeal.session}
+          onClose={() => setEditingMeal(null)}
+          onSaved={load}
+        />
+      )}
     </div>
   );
 }
