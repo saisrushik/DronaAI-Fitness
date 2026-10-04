@@ -5,6 +5,7 @@ from datetime import date, datetime, timezone
 
 from sqlalchemy import select
 
+from app.core.config import settings
 from app.core.security import generate_share_code, hash_password
 from app.db.models import Coach, Customer, User, WorkoutDietPlan
 from app.db.session import AsyncSessionLocal
@@ -153,7 +154,6 @@ async def seed() -> None:
                 first_name=data["first_name"],
                 last_name=data["last_name"],
                 role="coach",
-                email_verified=True,
                 disclaimer_accepted_at=datetime.now(timezone.utc),
                 password_hash=hash_password(PASSWORD),
             )
@@ -180,7 +180,6 @@ async def seed() -> None:
                 first_name=data["first_name"],
                 last_name=data["last_name"],
                 role="customer",
-                email_verified=True,
                 disclaimer_accepted_at=datetime.now(timezone.utc),
                 password_hash=hash_password(PASSWORD),
             )
@@ -231,4 +230,6 @@ async def seed() -> None:
 
 
 if __name__ == "__main__":
+    if settings.is_production:
+        raise SystemExit("Refusing to seed: demo accounts share a published password.")
     asyncio.run(seed())

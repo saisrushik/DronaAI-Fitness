@@ -4,13 +4,15 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from app.core.config import settings
+from app.core.proxy import via_proxy
 from app.db.models import Base
 
 # Alembic Config object
 config = context.config
 
-# Use the sync URL (Alembic doesn't need async)
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL_SYNC)
+# Alembic's config is configparser-based, so URL-encoded passwords need their % escaped.
+sync_url = via_proxy(settings.DATABASE_URL_SYNC, settings.OUTBOUND_PROXY)
+config.set_main_option("sqlalchemy.url", sync_url.replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

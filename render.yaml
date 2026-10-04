@@ -7,12 +7,17 @@ services:
     # preDeployCommand requires a paid plan, so migrations run as part of the build instead.
     buildCommand: pip install -r requirements.txt && alembic upgrade head
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /api/v1/health
+    # /ready checks the database, so a deploy that can't reach it never receives traffic.
+    healthCheckPath: /api/v1/ready
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.9"
       - key: ENVIRONMENT
         value: production
+      # Trust X-Forwarded-For only from Render's private load balancer, so rate limits apply per
+      # real client IP instead of to everyone at once, and client-supplied entries are ignored.
+      - key: FORWARDED_ALLOW_IPS
+        value: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
       - key: COOKIE_SECURE
         value: "true"
       # The frontend is on a different domain, so the cookie must be cross-site.
@@ -26,16 +31,4 @@ services:
       - key: JWT_SECRET_KEY
         generateValue: true
       - key: BACKEND_CORS_ORIGINS
-        sync: false
-      - key: FRONTEND_URL
-        sync: false
-      - key: SMTP_HOST
-        sync: false
-      - key: SMTP_PORT
-        sync: false
-      - key: SMTP_USER
-        sync: false
-      - key: SMTP_PASSWORD
-        sync: false
-      - key: SMTP_FROM
         sync: false

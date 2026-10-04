@@ -75,28 +75,6 @@ class RegisterRequest(BaseModel):
         return self
 
 
-class VerifyEmailRequest(BaseModel):
-    token: str
-
-
-class ResendVerificationRequest(BaseModel):
-    email: EmailStr
-
-
-class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
-
-
-class ResetPasswordRequest(BaseModel):
-    token: str
-    password: str = Field(max_length=128)
-
-    @field_validator("password")
-    @classmethod
-    def check_password(cls, value: str) -> str:
-        return validate_password(value)
-
-
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
@@ -170,7 +148,6 @@ class MeResponse(BaseModel):
     last_name: str
     full_name: str
     role: Role
-    email_verified: bool
     profile_completed: bool
     customer: CustomerProfile | None = None
     coach: CoachProfile | None = None

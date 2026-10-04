@@ -8,10 +8,8 @@ import jwt
 
 from app.core.config import settings
 
-# Tokens carry a purpose so a password-reset link can't be used as a session.
+# Only session tokens are accepted; tokens issued for any other purpose are rejected.
 SESSION = "session"
-VERIFY_EMAIL = "verify_email"
-RESET_PASSWORD = "reset_password"
 
 PASSWORD_RULES = (
     "Password must be at least 8 characters and include an uppercase letter, "

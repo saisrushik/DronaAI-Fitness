@@ -6,13 +6,10 @@ import ChatPage from "./pages/ChatPage";
 import CustomerDashboardPage from "./pages/CustomerDashboardPage";
 import CustomerDetailPage from "./pages/CustomerDetailPage";
 import DietPlanPage from "./pages/DietPlanPage";
-import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage";
 import ProfilePage from "./pages/ProfilePage";
 import RegisterPage from "./pages/RegisterPage";
-import ResetPasswordPage from "./pages/ResetPasswordPage";
-import VerifyEmailPage from "./pages/VerifyEmailPage";
 import WorkoutPlanPage from "./pages/WorkoutPlanPage";
 
 export default function App() {
@@ -23,9 +20,6 @@ export default function App() {
           <Route index element={<LandingPage />} />
           <Route path="login" element={<LoginPage />} />
           <Route path="register" element={<RegisterPage />} />
-          <Route path="verify-email" element={<VerifyEmailPage />} />
-          <Route path="forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="reset-password" element={<ResetPasswordPage />} />
 
           <Route element={<RequireAuth />}>
             <Route path="profile" element={<ProfilePage />} />

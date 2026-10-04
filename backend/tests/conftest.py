@@ -5,14 +5,11 @@ from collections.abc import AsyncGenerator
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 os.environ.setdefault("DATABASE_URL_SYNC", "sqlite:///:memory:")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-for-tests-only")
-os.environ.setdefault("SMTP_HOST", "")
 
 import pytest_asyncio  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
-from sqlalchemy import update  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 
-from app.db.models import User  # noqa: E402
 from app.db.session import Base, get_db  # noqa: E402
 from app.main import app  # noqa: E402
 
@@ -77,16 +74,9 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
     await engine.dispose()
 
 
-async def register_verified(client: AsyncClient, payload: dict) -> None:
-    """Registers an account and marks it verified, skipping the email round-trip."""
+async def register(client: AsyncClient, payload: dict) -> None:
     response = await client.post("/api/v1/auth/register", json=payload)
     assert response.status_code == 201, response.text
-
-    async with client.session_factory() as session:  # type: ignore[attr-defined]
-        await session.execute(
-            update(User).where(User.email == payload["email"]).values(email_verified=True)
-        )
-        await session.commit()
 
 
 async def login(client: AsyncClient, email: str, password: str = "Password123!") -> dict:

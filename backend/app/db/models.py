@@ -40,7 +40,6 @@ class User(Base):
     last_name: Mapped[str] = mapped_column(String(60), nullable=False, default="")
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="customer")
 
-    email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     disclaimer_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     created_at: Mapped[datetime] = mapped_column(

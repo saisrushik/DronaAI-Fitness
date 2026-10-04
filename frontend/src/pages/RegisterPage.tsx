@@ -1,8 +1,10 @@
 import { useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { APP_NAME } from "../config/brand";
 import { useAuth, type Role } from "../context/AuthContext";
-import { PASSWORD_HINT } from "./ResetPasswordPage";
+
+const PASSWORD_HINT =
+  "At least 8 characters, with an uppercase letter, a number and a special character.";
 
 const roleOptions: { value: Role; title: string; description: string }[] = [
   {
@@ -30,11 +32,11 @@ const emptyForm = {
 
 export default function RegisterPage() {
   const { register } = useAuth();
+  const navigate = useNavigate();
   const [form, setForm] = useState(emptyForm);
   const [role, setRole] = useState<Role>("customer");
   const [acceptedDisclaimer, setAcceptedDisclaimer] = useState(false);
   const [error, setError] = useState("");
-  const [done, setDone] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const isCustomer = role === "customer";
@@ -50,7 +52,7 @@ export default function RegisterPage() {
     setError("");
     setSubmitting(true);
     try {
-      const message = await register({
+      await register({
         first_name: form.first_name,
         last_name: form.last_name,
         email: form.email,
@@ -67,7 +69,8 @@ export default function RegisterPage() {
           ...(form.hip_cm ? { hip_cm: Number(form.hip_cm) } : {}),
         }),
       });
-      setDone(message);
+      // New accounts always start with an incomplete profile.
+      navigate("/profile", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");
     } finally {
@@ -99,20 +102,6 @@ export default function RegisterPage() {
       />
     </div>
   );
-
-  if (done) {
-    return (
-      <div className="mx-auto max-w-md">
-        <div className="card text-center">
-          <h1 className="text-2xl font-bold">Almost there</h1>
-          <p className="mt-4 text-sm text-slate-600">{done}</p>
-          <Link to="/login" className="btn-primary mt-6 inline-flex">
-            Go to login
-          </Link>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="mx-auto max-w-2xl">

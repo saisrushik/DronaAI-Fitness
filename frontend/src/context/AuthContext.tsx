@@ -52,7 +52,6 @@ export interface User {
   last_name: string;
   full_name: string;
   role: Role;
-  email_verified: boolean;
   profile_completed: boolean;
   customer: CustomerProfile | null;
   coach: CoachProfile | null;
@@ -84,7 +83,7 @@ interface AuthContextValue {
   user: User | null;
   loading: boolean;
   login: (input: Credentials) => Promise<User>;
-  register: (input: RegisterInput) => Promise<string>;
+  register: (input: RegisterInput) => Promise<User>;
   logout: () => Promise<void>;
   setUser: (user: User) => void;
 }
@@ -113,8 +112,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return me;
     },
     register: async (input) => {
-      const { message } = await api.post<{ message: string }>("/auth/register", input);
-      return message;
+      const me = await api.post<User>("/auth/register", input);
+      setUser(me);
+      return me;
     },
     logout: async () => {
       await api.post("/auth/logout").catch(() => undefined);

@@ -4,6 +4,7 @@ import asyncio
 
 from sqlalchemy import delete
 
+from app.core.config import settings
 from app.db.models import Coach, Customer, User, WorkoutDietPlan
 from app.db.session import AsyncSessionLocal
 
@@ -17,4 +18,6 @@ async def reset() -> None:
 
 
 if __name__ == "__main__":
+    if settings.is_production:
+        raise SystemExit("Refusing to wipe data with ENVIRONMENT=production.")
     asyncio.run(reset())

@@ -20,11 +20,47 @@ jobs:
       - run: pip install -r requirements.txt
       - run: pytest -q
 
+  # Deploys run `alembic upgrade head` on Postgres, so prove it works there before merging.
+  migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: fitness
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ci" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://ci:ci@localhost:5432/fitness
+      DATABASE_URL_SYNC: postgresql+psycopg://ci:ci@localhost:5432/fitness
+      JWT_SECRET_KEY: ci-only-secret-key-not-used-anywhere-else
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: alembic upgrade head
+      # Fails when a model changed without a matching migration.
+      - run: alembic check
+      - run: alembic downgrade base
+      - run: alembic upgrade head
+      - run: python -m scripts.seed
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
+    env:
+      VITE_API_BASE_URL: https://api.example.com
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

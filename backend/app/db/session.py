@@ -4,13 +4,17 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
+from app.core.proxy import via_proxy
 
 
 class Base(DeclarativeBase):
     pass
 
 
-engine = create_async_engine(settings.DATABASE_URL, echo=False, future=True)
+# pre_ping replaces connections the Supabase pooler dropped while the app was idle.
+engine = create_async_engine(
+    via_proxy(settings.DATABASE_URL, settings.OUTBOUND_PROXY), pool_pre_ping=True
+)
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,

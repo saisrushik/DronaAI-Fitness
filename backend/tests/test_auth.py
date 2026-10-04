@@ -1,7 +1,7 @@
 import pytest
 from httpx import AsyncClient
 
-from tests.conftest import COACH, CUSTOMER, login, register_verified
+from tests.conftest import COACH, CUSTOMER, login, register
 
 pytestmark = pytest.mark.asyncio
 
@@ -31,18 +31,24 @@ async def test_registration_enforces_age_limits(client: AsyncClient, dob: str) -
     assert "18-70" in response.text
 
 
-async def test_login_blocked_until_email_verified(client: AsyncClient) -> None:
-    await client.post("/api/v1/auth/register", json=CUSTOMER)
+async def test_registration_signs_the_user_in(client: AsyncClient) -> None:
+    response = await client.post("/api/v1/auth/register", json=CUSTOMER)
+    assert response.status_code == 201
+    assert response.json()["email"] == CUSTOMER["email"]
+    assert "httponly" in response.headers["set-cookie"].lower()
 
-    response = await client.post(
-        "/api/v1/auth/login", json={"email": CUSTOMER["email"], "password": CUSTOMER["password"]}
-    )
-    assert response.status_code == 403
-    assert "verify" in response.text.lower()
+    assert (await client.get("/api/v1/auth/me")).status_code == 200
+
+
+async def test_duplicate_email_rejected(client: AsyncClient) -> None:
+    await register(client, CUSTOMER)
+    response = await client.post("/api/v1/auth/register", json=CUSTOMER)
+    assert response.status_code == 409
 
 
 async def test_login_sets_httponly_cookie_and_logout_clears_it(client: AsyncClient) -> None:
-    await register_verified(client, CUSTOMER)
+    await register(client, CUSTOMER)
+    await client.post("/api/v1/auth/logout")
 
     response = await client.post(
         "/api/v1/auth/login", json={"email": CUSTOMER["email"], "password": CUSTOMER["password"]}
@@ -58,7 +64,7 @@ async def test_login_sets_httponly_cookie_and_logout_clears_it(client: AsyncClie
 
 
 async def test_wrong_password_rejected(client: AsyncClient) -> None:
-    await register_verified(client, CUSTOMER)
+    await register(client, CUSTOMER)
 
     response = await client.post(
         "/api/v1/auth/login", json={"email": CUSTOMER["email"], "password": "WrongPass123!"}
@@ -71,28 +77,21 @@ async def test_unauthenticated_requests_rejected(client: AsyncClient) -> None:
     assert (await client.get("/api/v1/coach/customers")).status_code == 401
 
 
-async def test_password_reset_token_cannot_be_reused_as_session(client: AsyncClient) -> None:
-    await register_verified(client, CUSTOMER)
-    await client.post("/api/v1/auth/forgot-password", json={"email": CUSTOMER["email"]})
+async def test_non_session_token_rejected(client: AsyncClient) -> None:
+    from app.core.security import create_token
 
-    # A verification token must not be accepted by the reset endpoint.
-    from app.core.security import VERIFY_EMAIL, create_token
+    await register(client, CUSTOMER)
+    me = (await client.get("/api/v1/auth/me")).json()
+    await client.post("/api/v1/auth/logout")
 
-    bogus = create_token("00000000-0000-0000-0000-000000000000", VERIFY_EMAIL)
-    response = await client.post(
-        "/api/v1/auth/reset-password", json={"token": bogus, "password": "Password123!"}
-    )
-    assert response.status_code == 400
-
-
-async def test_forgot_password_does_not_reveal_account_existence(client: AsyncClient) -> None:
-    known = await client.post("/api/v1/auth/forgot-password", json={"email": CUSTOMER["email"]})
-    unknown = await client.post("/api/v1/auth/forgot-password", json={"email": "nobody@test.com"})
-    assert known.json() == unknown.json()
+    # e.g. a leftover email-verification token must never work as a session.
+    token = create_token(me["id"], purpose="verify_email")
+    response = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 401
 
 
 async def test_full_name_is_composed_and_age_derived(client: AsyncClient) -> None:
-    await register_verified(client, CUSTOMER)
+    await register(client, CUSTOMER)
     me = await login(client, CUSTOMER["email"])
 
     assert me["full_name"] == "Test Customer"

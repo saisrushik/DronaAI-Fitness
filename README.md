@@ -13,8 +13,7 @@ Design docs: [High-Level Design](docs/HIGH_LEVEL_DESIGN.md) · [Business Require
 ### Authentication
 - Session stored in an **httpOnly cookie** — not readable by JavaScript.
 - Passwords hashed with bcrypt; complexity enforced (8+ chars, uppercase, number, special).
-- **Email verification** required before first login.
-- **Password reset** by emailed link. Tokens are purpose-scoped, so a reset link can't be used as a session.
+- Signing up logs you straight in — the app sends no email.
 - Logout clears the cookie server-side.
 - Two roles: **customer** and **coach**. Each gets its own profile table.
 - First-time users are forced to complete their profile before anything else opens up.
@@ -116,7 +115,7 @@ customers 1 ─── N workout_diet_plans
 
 | Table | Holds |
 |---|---|
-| `users` | email, password_hash, first_name, last_name, role, email_verified, disclaimer_accepted_at |
+| `users` | email, password_hash, first_name, last_name, role, disclaimer_accepted_at |
 | `coaches` | specialization, years_experience, bio |
 | `customers` | share_code, date_of_birth, gender, height, weight, waist, neck, hip, activity_level, primary_goal, diet_type, dietary_preferences (JSONB), health_injury_history (JSONB), `coach_id` |
 | `workout_diet_plans` | plan_type, title, content (JSONB), approved_at, `customer_id`, `coach_id` |
@@ -129,13 +128,9 @@ All routes are prefixed with `/api/v1`. Interactive docs at http://localhost:800
 
 | Method | Endpoint | Access |
 |---|---|---|
-| POST | `/auth/register` | Public |
-| POST | `/auth/verify-email` | Public |
-| POST | `/auth/resend-verification` | Public |
+| POST | `/auth/register` | Public — creates the account and sets the session cookie |
 | POST | `/auth/login` | Public — sets the session cookie |
 | POST | `/auth/logout` | Public — clears the cookie |
-| POST | `/auth/forgot-password` | Public |
-| POST | `/auth/reset-password` | Public |
 | GET | `/auth/me` | Authenticated |
 | PUT | `/auth/me/customer-profile` | Customer |
 | PUT | `/auth/me/coach-profile` | Coach |
@@ -156,7 +151,7 @@ Authorization is enforced server-side, not just hidden in the UI: customers get 
 
 ## Demo accounts
 
-All seeded accounts use the password `Password123!` and are pre-verified.
+All seeded accounts use the password `Password123!`.
 
 | Email | Role | Notes |
 |---|---|---|
@@ -179,7 +174,6 @@ see the approval step). Share codes are printed when you run the seed script.
 |---|---|
 | httpOnly cookie sessions | Done |
 | Password complexity | Done |
-| Email verification + password reset | Done |
 | Rate limiting (10 logins/min, 5 registrations/hour) | Done |
 | Consent required before a coach sees customer data | Done |
 | Plan contents withheld until the customer approves | Done |
@@ -187,8 +181,9 @@ see the approval step). Share codes are printed when you run the seed script.
 | Security headers (nosniff, DENY framing, HSTS in prod) | Done |
 | API docs disabled in production | Done |
 | Least-privilege database role | Done — run `python -m scripts.create_app_role` |
-| Test suite (46 tests: auth, authorization, calculators, plan safety) | Done |
-| CI on push and PR | Done |
+| Test suite (55 tests: auth, authorization, calculators, plan safety, production settings) | Done |
+| CI on push and PR (tests, migrations on real Postgres, frontend build) | Done |
+| Unsafe production settings stop the deploy | Done |
 
 Still outstanding, and worth doing before a large launch:
 
@@ -234,4 +229,4 @@ Phases 1–3 of the HLD are partly delivered. Still to come:
 - Chat assistant (UI shell exists, not yet wired to a model)
 - Progress logging and weekly plan adaptation
 - Indian regional cuisine support (BRD section 6)
-- Refresh tokens, email verification, password reset
+- Refresh tokens

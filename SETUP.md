@@ -128,20 +128,18 @@ DATABASE_URL=postgresql+asyncpg://<user>:<password>@<host>:5432/<database>
 DATABASE_URL_SYNC=postgresql+psycopg://<user>:<password>@<host>:5432/<database>
 JWT_SECRET_KEY=<a long random string>
 BACKEND_CORS_ORIGINS=http://localhost:5173,http://localhost:5174
-FRONTEND_URL=http://localhost:5173
 ```
-
-Leave `SMTP_HOST` empty for local development — verification and password reset emails are
-printed to the backend console instead of being sent.
 
 Both URLs point at the same database — the app uses the async driver, Alembic uses the sync one. Only the `postgresql+asyncpg` / `postgresql+psycopg` prefix differs.
 
 **Using Supabase?** Take the URI you copied and swap the `postgresql://` prefix for each driver. For example:
 
 ```ini
-DATABASE_URL=postgresql+asyncpg://postgres.abcdefgh:MyPassword@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres
-DATABASE_URL_SYNC=postgresql+psycopg://postgres.abcdefgh:MyPassword@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres
+DATABASE_URL=postgresql+asyncpg://postgres.abcdefgh:MyPassword@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres?ssl=require
+DATABASE_URL_SYNC=postgresql+psycopg://postgres.abcdefgh:MyPassword@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require
 ```
+
+The `ssl` / `sslmode` suffix encrypts the connection; production refuses to start without it.
 
 > **Special characters in your password must be URL-encoded**, or the connection string won't parse:
 > `@` → `%40` · `#` → `%23` · `%` → `%25` · `/` → `%2F` · `:` → `%3A`
@@ -204,14 +202,6 @@ Open http://localhost:5173 and log in with any [demo account](README.md#demo-acc
 
 ---
 
-## Signing up a new account locally
-
-New accounts must verify their email before they can log in. Without SMTP configured, the
-verification link is printed in the **backend terminal** — copy it into your browser to finish
-signing up. The same applies to password reset links.
-
----
-
 ## Troubleshooting
 
 ### `getaddrinfo ENOTFOUND proxy.<company>.com`
@@ -233,6 +223,18 @@ npm config delete https-proxy
 ### `socket.gaierror: [Errno 11001] getaddrinfo failed`
 
 The Supabase hostname didn't resolve. You're most likely using the **Direct connection** string, which is IPv6-only. Switch to the **Session pooler** string (see step 3).
+
+### `TimeoutError` connecting to the database (corporate network)
+
+The network blocks outbound port 5432. If it has an HTTP proxy that allows `CONNECT`, set it in
+`backend/.env` and keep the real Supabase URLs. The app and Alembic tunnel through it
+automatically:
+
+```ini
+OUTBOUND_PROXY=http://proxy.example.com:80
+```
+
+Remove the line on networks that don't need it. It is rejected when `ENVIRONMENT=production`.
 
 ### `asyncpg.exceptions.InvalidPasswordError`
 
@@ -297,53 +299,7 @@ python -m scripts.seed
 
 Frontend on Vercel, backend on Render, database on Supabase. All three have free tiers.
 
-## 1. Set up email
-
-Verification and password reset links are emailed. **Without SMTP configured, nobody can complete
-sign-up** — the links only appear in the server log. Set this up before going live.
-
-### Option A — Gmail (free, no domain needed, good for MVP)
-
-1. Enable [2-Step Verification](https://myaccount.google.com/security) on the Google account
-   you'll send from.
-2. Go to [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) and
-   create an app password.
-3. Configure:
-
-   ```ini
-   SMTP_HOST=smtp.gmail.com
-   SMTP_PORT=587
-   SMTP_USER=your.address@gmail.com
-   SMTP_PASSWORD=<16-character app password, no spaces>
-   SMTP_FROM=DronaAI.fit <your.address@gmail.com>
-   ```
-
-   Gmail forces the `From` address to match the authenticated account, so `SMTP_FROM` must use
-   the same address as `SMTP_USER`.
-
-   **Limits:** ~500 emails/day on a free Gmail account. Fine for an MVP or private beta; switch
-   to a transactional provider before a public launch.
-
-### Option B — Resend (needs a verified domain, scales further)
-
-[Resend](https://resend.com) is free for 3,000 emails/month:
-
-1. Sign up and verify a sending domain (or use their shared test address, which only delivers to
-   your own Resend account email — fine for testing, not for real users).
-2. Create an API key.
-3. Configure:
-
-   ```ini
-   SMTP_HOST=smtp.resend.com
-   SMTP_PORT=587
-   SMTP_USER=resend
-   SMTP_PASSWORD=<your API key>
-   SMTP_FROM=DronaAI.fit <no-reply@yourdomain.com>
-   ```
-
-Any SMTP provider works the same way — Mailgun, SendGrid, Postmark, etc.
-
-## 2. Lock down the database
+## 1. Lock down the database
 
 By default the app connects as the Postgres **superuser**. Create a restricted role instead, so a
 compromised app can't drop tables:
@@ -356,7 +312,7 @@ python -m scripts.create_app_role
 It prints a connection string. Use it for `DATABASE_URL` and keep `DATABASE_URL_SYNC` pointing at
 the owner account — Alembic needs schema rights to run migrations.
 
-## 3. Deploy the backend to Render
+## 2. Deploy the backend to Render
 
 1. Push the repository to GitHub.
 2. In Render, choose **New → Blueprint** and select the repo. It reads [`render.yaml`](render.yaml).
@@ -368,15 +324,19 @@ the owner account — Alembic needs schema rights to run migrations.
    | `DATABASE_URL` | Supabase pooler URL with the `fitness_app` role |
    | `DATABASE_URL_SYNC` | Same host, owner account, `postgresql+psycopg://` prefix |
    | `BACKEND_CORS_ORIGINS` | Your Vercel URL, e.g. `https://fitness.vercel.app` |
-   | `FRONTEND_URL` | The same Vercel URL |
-   | `SMTP_*` | From step 1 |
 
    `JWT_SECRET_KEY` is generated automatically. `ENVIRONMENT`, `COOKIE_SECURE` and
    `COOKIE_SAMESITE` are already set correctly in the blueprint.
 
-Migrations run automatically before each deploy via `preDeployCommand`.
+Migrations run automatically during each build (`alembic upgrade head` in `buildCommand`).
 
-## 4. Deploy the frontend to Vercel
+With `ENVIRONMENT=production` the API refuses to start if a setting is unsafe or still local: a
+short `JWT_SECRET_KEY`, `COOKIE_SECURE=false`, `OUTBOUND_PROXY` set, or a database or CORS URL
+pointing at localhost. The build fails with the list of problems, so a
+misconfigured deploy never goes live. Render only switches traffic once `/api/v1/ready` confirms
+the database is reachable.
+
+## 3. Deploy the frontend to Vercel
 
 1. **New Project**, select the repo, set the root directory to `frontend`.
 2. Vercel reads [`frontend/vercel.json`](frontend/vercel.json) for the build and SPA routing.
@@ -386,10 +346,9 @@ Migrations run automatically before each deploy via `preDeployCommand`.
    VITE_API_BASE_URL=https://your-api.onrender.com
    ```
 
-4. Deploy, then go back to Render and set `BACKEND_CORS_ORIGINS` and `FRONTEND_URL` to the real
-   Vercel URL.
+4. Deploy, then go back to Render and set `BACKEND_CORS_ORIGINS` to the real Vercel URL.
 
-## 5. Seed the first coach
+## 4. Seed the first coach
 
 Coaches can self-register, but you may want to create the first one yourself. From your machine,
 with `.env` pointing at the production database:
@@ -420,7 +379,7 @@ succeed but every subsequent request is unauthenticated**. The blueprint sets th
 |---|---|
 | `https://your-api.onrender.com/docs` | **404** — docs are disabled in production |
 | `https://your-api.onrender.com/api/v1/ready` | `{"status":"ready"}` |
-| Sign up with a real email | Verification email arrives |
+| Sign up a new account | Lands on the profile page, already logged in |
 | Log in, refresh the page | Still logged in |
 | 11 rapid failed logins | The 11th returns `429` |
 

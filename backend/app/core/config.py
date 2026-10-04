@@ -1,4 +1,7 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+LOCAL_HOSTS = ("localhost", "127.0.0.1")
 
 
 class Settings(BaseSettings):
@@ -10,6 +13,8 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str
     DATABASE_URL_SYNC: str
+    # Local development only: HTTP proxy for networks that block port 5432.
+    OUTBOUND_PROXY: str = ""
 
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
@@ -19,16 +24,6 @@ class Settings(BaseSettings):
     COOKIE_NAME: str = "fitness_session"
     COOKIE_SECURE: bool = False
     COOKIE_SAMESITE: str = "lax"
-
-    # Used to build links in verification / password reset emails.
-    FRONTEND_URL: str = "http://localhost:5173"
-
-    # Leave SMTP_HOST empty in development — emails are logged to the console instead.
-    SMTP_HOST: str = ""
-    SMTP_PORT: int = 587
-    SMTP_USER: str = ""
-    SMTP_PASSWORD: str = ""
-    SMTP_FROM: str = "DronaAI.fit <no-reply@dronaai.fit>"
 
     # Comma-separated list of allowed origins
     BACKEND_CORS_ORIGINS: str = "http://localhost:5173"
@@ -40,6 +35,31 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT.lower() == "production"
+
+    @model_validator(mode="after")
+    def check_production_settings(self) -> "Settings":
+        """Refuse to start in production with settings that would break or weaken the deploy."""
+        if not self.is_production:
+            return self
+
+        problems = []
+        if len(self.JWT_SECRET_KEY) < 32 or "change_me" in self.JWT_SECRET_KEY:
+            problems.append("JWT_SECRET_KEY must be a random string of at least 32 characters")
+        if not self.COOKIE_SECURE:
+            problems.append("COOKIE_SECURE must be true")
+        if self.OUTBOUND_PROXY:
+            problems.append("OUTBOUND_PROXY is for local development only")
+        for name in ("DATABASE_URL", "DATABASE_URL_SYNC", "BACKEND_CORS_ORIGINS"):
+            if any(host in getattr(self, name) for host in LOCAL_HOSTS):
+                problems.append(f"{name} must not point at localhost")
+        if "ssl=require" not in self.DATABASE_URL:
+            problems.append("DATABASE_URL must end with ?ssl=require")
+        if "sslmode=require" not in self.DATABASE_URL_SYNC:
+            problems.append("DATABASE_URL_SYNC must end with ?sslmode=require")
+
+        if problems:
+            raise ValueError("Unsafe production settings:\n- " + "\n- ".join(problems))
+        return self
 
 
 settings = Settings()  # type: ignore[call-arg]

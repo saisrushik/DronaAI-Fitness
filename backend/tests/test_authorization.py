@@ -1,7 +1,7 @@
 import pytest
 from httpx import AsyncClient
 
-from tests.conftest import COACH, CUSTOMER, CUSTOMER_PROFILE, login, register_verified
+from tests.conftest import COACH, CUSTOMER, CUSTOMER_PROFILE, login, register
 
 pytestmark = pytest.mark.asyncio
 
@@ -9,7 +9,7 @@ OTHER_COACH = {**COACH, "email": "other.coach@test.com"}
 
 
 async def _customer_with_profile(client: AsyncClient) -> dict:
-    await register_verified(client, CUSTOMER)
+    await register(client, CUSTOMER)
     await login(client, CUSTOMER["email"])
     response = await client.put("/api/v1/auth/me/customer-profile", json=CUSTOMER_PROFILE)
     assert response.status_code == 200, response.text
@@ -22,7 +22,7 @@ async def test_customer_cannot_access_coach_endpoints(client: AsyncClient) -> No
 
 
 async def test_coach_cannot_access_customer_endpoints(client: AsyncClient) -> None:
-    await register_verified(client, COACH)
+    await register(client, COACH)
     await login(client, COACH["email"])
     assert (await client.get("/api/v1/plans/mine")).status_code == 403
 
@@ -32,7 +32,7 @@ async def test_coach_needs_share_code_to_add_customer(client: AsyncClient) -> No
     share_code = me["customer"]["share_code"]
 
     await client.post("/api/v1/auth/logout")
-    await register_verified(client, COACH)
+    await register(client, COACH)
     await login(client, COACH["email"])
 
     bad = await client.post("/api/v1/coach/customers/link", json={"share_code": "WRONGCOD"})
@@ -48,13 +48,13 @@ async def test_coach_cannot_touch_another_coachs_customer(client: AsyncClient) -
     share_code = me["customer"]["share_code"]
 
     await client.post("/api/v1/auth/logout")
-    await register_verified(client, COACH)
+    await register(client, COACH)
     await login(client, COACH["email"])
     linked = await client.post("/api/v1/coach/customers/link", json={"share_code": share_code})
     customer_id = linked.json()["id"]
 
     await client.post("/api/v1/auth/logout")
-    await register_verified(client, OTHER_COACH)
+    await register(client, OTHER_COACH)
     await login(client, OTHER_COACH["email"])
 
     assert (await client.get(f"/api/v1/coach/customers/{customer_id}")).status_code == 403
@@ -69,7 +69,7 @@ async def test_plan_content_withheld_until_customer_approves(client: AsyncClient
     share_code = me["customer"]["share_code"]
 
     await client.post("/api/v1/auth/logout")
-    await register_verified(client, COACH)
+    await register(client, COACH)
     await login(client, COACH["email"])
     linked = await client.post("/api/v1/coach/customers/link", json={"share_code": share_code})
     customer_id = linked.json()["id"]
