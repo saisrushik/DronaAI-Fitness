@@ -2,10 +2,13 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { Link } from "react-router-dom";
 import LineChart from "../components/LineChart";
 import type { Plan, WorkoutContent } from "../components/PlanCard";
+import { MeasureInput } from "../components/UnitInputs";
 import type { WeeklyDietContent } from "../components/WeeklyDietPlan";
+import WeeklyReviewList, { type WeeklyReview } from "../components/WeeklyReviewList";
 import { useAuth, type User } from "../context/AuthContext";
 import { api } from "../lib/api";
 import type { Measurement } from "../lib/measurements";
+import { toDisplay, unitLabel, useUnitSystem } from "../lib/units";
 import {
   ACTIVITY_TYPES,
   currentStreak,
@@ -100,9 +103,11 @@ function StatTile({ label, value, hint }: { label: string; value: string; hint: 
 
 export default function ProgressPage() {
   const { user, setUser } = useAuth();
+  const system = useUnitSystem();
   const today = isoDay(new Date());
   const [logs, setLogs] = useState<ProgressLog[]>([]);
   const [weights, setWeights] = useState<Measurement[]>([]);
+  const [reviews, setReviews] = useState<WeeklyReview[]>([]);
   const [workoutPlan, setWorkoutPlan] = useState<WorkoutContent | null>(null);
   const [dietPlan, setDietPlan] = useState<WeeklyDietContent | null>(null);
   const [loading, setLoading] = useState(true);
@@ -118,9 +123,11 @@ export default function ProgressPage() {
         api.get<ProgressLog[]>("/progress?days=90"),
         api.get<Measurement[]>("/measurements"),
         api.get<Plan[]>("/plans/mine"),
-      ]).then(([progress, measurements, plans]) => {
+        api.get<WeeklyReview[]>("/progress/reviews"),
+      ]).then(([progress, measurements, plans, weeklyReviews]) => {
         setLogs(progress);
         setWeights(measurements);
+        setReviews(weeklyReviews);
         // Plans come newest first; use the latest one the customer has accepted.
         const latest = (type: Plan["plan_type"]) =>
           plans.find((p) => p.plan_type === type && p.approved_at && p.content)?.content ?? null;
@@ -233,11 +240,14 @@ export default function ProgressPage() {
   const weightSeries = {
     key: "weight",
     label: "Weight",
-    unit: "kg",
+    unit: unitLabel("weight", system),
     color: "#6366f1",
     points: weights
       .filter((m) => m.weight_kg !== null)
-      .map((m) => ({ t: Date.parse(m.recorded_at), v: m.weight_kg as number })),
+      .map((m) => ({
+        t: Date.parse(m.recorded_at),
+        v: toDisplay(m.weight_kg as number, "weight", system),
+      })),
   };
   const wellness = (
     [
@@ -292,6 +302,20 @@ export default function ProgressPage() {
           hint="Over the last 7 days"
         />
       </div>
+
+      <section className="card">
+        <h2 className="text-xl font-semibold">Weekly reviews</h2>
+        <p className="mt-1 text-sm text-slate-600">
+          Each week of check-ins is summarised, and your weight trend is compared with your
+          goal. If you&apos;re off track, your coach may adjust your calorie target.
+        </p>
+        <div className="mt-4">
+          <WeeklyReviewList
+            reviews={reviews.slice(0, 4)}
+            emptyText="Your first review appears after a week of check-ins (at least 3 days logged). Log your weight twice a week for a calorie check."
+          />
+        </div>
+      </section>
 
       <form onSubmit={save} className="card space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -570,19 +594,17 @@ export default function ProgressPage() {
             </div>
             <div>
               <label className="label" htmlFor="day-weight">
-                Weight (kg)
+                Weight ({unitLabel("weight", system)})
               </label>
-              <input
+              <MeasureInput
                 id="day-weight"
-                type="number"
-                inputMode="decimal"
+                quantity="weight"
+                system={system}
                 min={30}
                 max={250}
-                step="0.1"
                 placeholder="Optional"
                 value={form.weight}
-                onChange={(e) => update({ weight: e.target.value })}
-                className="input"
+                onChange={(weight) => update({ weight })}
               />
             </div>
             <div>

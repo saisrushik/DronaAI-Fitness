@@ -8,6 +8,7 @@ from app.services.calculator import (
     calculate_body_fat,
     calculate_ideal_weight,
     calculate_lbm,
+    calculate_metrics,
     calculate_targets,
     calculate_tdee,
     classify_bmi_asian,
@@ -95,13 +96,55 @@ def test_calorie_floor_protects_against_extreme_deficits():
     assert targets["calorie_floor_applied"] is True
 
 
+def test_coach_adjustment_shifts_the_target_but_never_below_the_floor():
+    args = (85, 180, 32, "male", "moderate", "lose_fat")
+    base = calculate_targets(*args)["target_calories"]
+    assert calculate_targets(*args, adjustment=-150)["target_calories"] == base - 150
+
+    small = (45, 150, 60, "female", "sedentary", "lose_fat")
+    assert calculate_targets(*small, adjustment=-500)["target_calories"] == 1200
+
+
 def test_goal_shifts_calories_in_the_right_direction():
     args = (85, 180, 32, "male", "moderate")
-    lose = calculate_targets(*args, "lose_fat")["target_calories"]
-    maintain = calculate_targets(*args, "maintain")["target_calories"]
-    gain = calculate_targets(*args, "build_muscle")["target_calories"]
 
-    assert lose < maintain < gain
+    def calories(goal: str) -> int:
+        return calculate_targets(*args, goal)["target_calories"]
+
+    assert calories("lose_fat") < calories("maintain")
+    assert calories("maintain") == calories("recomp") == calories("general_fitness")
+    assert calories("maintain") < calories("strength") < calories("lean_bulk")
+    assert calories("lean_bulk") < calories("aggressive_bulk")
+    # BRD 5.4: lean bulk is TDEE + 250, aggressive bulk TDEE + 500.
+    assert calories("aggressive_bulk") - calories("maintain") == 500
+    assert calories("lean_bulk") - calories("maintain") == 250
+
+
+def test_recomp_has_the_highest_protein():
+    args = (85, 180, 32, "male", "moderate")
+    protein = {
+        goal: calculate_targets(*args, goal)["protein_g"]
+        for goal in ("lose_fat", "lean_bulk", "maintain", "recomp", "endurance", "strength")
+    }
+    assert max(protein, key=protein.get) == "recomp"
+
+
+def test_endurance_shifts_calories_from_fat_to_carbs():
+    args = (85, 180, 32, "male", "moderate")
+    endurance = calculate_targets(*args, "endurance")
+    maintain = calculate_targets(*args, "maintain")
+    assert endurance["target_calories"] == maintain["target_calories"]
+    assert endurance["carbs_g"] > maintain["carbs_g"]
+    assert endurance["fat_g"] < maintain["fat_g"]
+
+
+@pytest.mark.parametrize(("country", "primary"), [("IN", "asian"), ("in", "asian"), ("GB", "who")])
+def test_primary_bmi_standard_follows_country(country, primary):
+    metrics = calculate_metrics(
+        weight_kg=70, height_cm=175, age=30, gender="male", activity_level="moderate",
+        goal="maintain", country=country,
+    )
+    assert metrics["bmi"]["primary"] == primary
 
 
 def test_macros_roughly_account_for_the_calorie_target():

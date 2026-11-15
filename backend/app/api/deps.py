@@ -8,7 +8,7 @@ from sqlalchemy.orm import joinedload
 
 from app.core.config import settings
 from app.core.security import decode_token
-from app.db.models import Coach, Customer, User
+from app.db.models import AuthSession, Coach, Customer, User
 from app.db.session import get_db
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -31,23 +31,31 @@ async def get_current_user(
     if token is None:
         raise invalid
 
-    subject = decode_token(token)
-    if subject is None:
+    payload = decode_token(token)
+    if payload is None:
         raise invalid
 
     try:
-        user_id = uuid.UUID(subject)
-    except ValueError:
+        user_id = uuid.UUID(payload["sub"])
+        session_id = uuid.UUID(payload.get("sid", ""))
+    except (TypeError, ValueError):
         raise invalid from None
 
+    # The session must still be live, so logout and revocation take effect immediately.
     result = await db.execute(
         select(User)
-        .where(User.id == user_id)
+        .join(AuthSession, AuthSession.user_id == User.id)
+        .where(
+            User.id == user_id,
+            AuthSession.id == session_id,
+            AuthSession.revoked_at.is_(None),
+        )
         .options(joinedload(User.coach), joinedload(User.customer))
     )
     user = result.scalar_one_or_none()
     if user is None:
         raise invalid
+    request.state.session_id = session_id
     return user
 
 

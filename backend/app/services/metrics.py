@@ -19,4 +19,6 @@ def metrics_for(customer: Customer | None) -> dict | None:
         waist_cm=customer.waist_cm,
         neck_cm=customer.neck_cm,
         hip_cm=customer.hip_cm,
+        country=customer.country or "IN",
+        adjustment=customer.calorie_adjustment or 0,
     )

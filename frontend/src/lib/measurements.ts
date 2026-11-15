@@ -1,3 +1,5 @@
+import type { Quantity } from "./units";
+
 export interface Measurement {
   id: string;
   recorded_at: string;
@@ -13,19 +15,20 @@ export type MetricKey = "weight_kg" | "height_cm" | "waist_cm" | "neck_cm" | "hi
 export interface MetricConfig {
   key: MetricKey;
   label: string;
-  unit: string;
+  quantity: Quantity;
   color: string;
+  /** Metric limits; the API validates against these. */
   min: number;
   max: number;
 }
 
 // Ranges mirror the API's validation.
 export const METRICS: MetricConfig[] = [
-  { key: "weight_kg", label: "Weight", unit: "kg", color: "#6366f1", min: 30, max: 250 },
-  { key: "height_cm", label: "Height", unit: "cm", color: "#10b981", min: 100, max: 250 },
-  { key: "waist_cm", label: "Waist", unit: "cm", color: "#f59e0b", min: 40, max: 200 },
-  { key: "neck_cm", label: "Neck", unit: "cm", color: "#f43f5e", min: 20, max: 60 },
-  { key: "hip_cm", label: "Hip", unit: "cm", color: "#0ea5e9", min: 40, max: 200 },
+  { key: "weight_kg", label: "Weight", quantity: "weight", color: "#6366f1", min: 30, max: 250 },
+  { key: "height_cm", label: "Height", quantity: "length", color: "#10b981", min: 100, max: 250 },
+  { key: "waist_cm", label: "Waist", quantity: "length", color: "#f59e0b", min: 40, max: 200 },
+  { key: "neck_cm", label: "Neck", quantity: "length", color: "#f43f5e", min: 20, max: 60 },
+  { key: "hip_cm", label: "Hip", quantity: "length", color: "#0ea5e9", min: 40, max: 200 },
 ];
 
 export const formatValue = (value: number) =>

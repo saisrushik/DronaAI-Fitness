@@ -4,11 +4,12 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_customer
-from app.db.models import BodyMeasurement, Customer
+from app.api.deps import get_current_customer, get_current_user
+from app.db.models import BodyMeasurement, Customer, User
 from app.db.session import get_db
 from app.schemas.user import MeasurementCreate, MeasurementResponse
 from app.services.measurements import measurement_from
+from app.services.weekly_review import ensure_weekly_review
 
 router = APIRouter(prefix="/measurements", tags=["measurements"])
 
@@ -33,6 +34,7 @@ async def my_measurements(
 @router.post("", response_model=MeasurementResponse, status_code=201)
 async def log_measurement(
     payload: MeasurementCreate,
+    user: User = Depends(get_current_user),
     customer: Customer = Depends(get_current_customer),
     db: AsyncSession = Depends(get_db),
 ) -> BodyMeasurement:
@@ -52,5 +54,8 @@ async def log_measurement(
 
     db.add(entry)
     await db.commit()
+    # A weigh-in can complete the week a review needs.
+    if await ensure_weekly_review(db, customer, user.full_name):
+        await db.commit()
     await db.refresh(entry)
     return entry

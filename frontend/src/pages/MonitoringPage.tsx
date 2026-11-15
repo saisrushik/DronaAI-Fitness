@@ -11,16 +11,20 @@ import {
   type MetricKey,
 } from "../lib/measurements";
 import { formatDateTime } from "../lib/requests";
+import { format, toDisplay, unitLabel, useUnitSystem, type UnitSystem } from "../lib/units";
 
-function toSeries(metric: MetricConfig, entries: Measurement[]): ChartSeries {
+function toSeries(metric: MetricConfig, entries: Measurement[], system: UnitSystem): ChartSeries {
   return {
     key: metric.key,
     label: metric.label,
-    unit: metric.unit,
+    unit: unitLabel(metric.quantity, system),
     color: metric.color,
     points: entries
       .filter((entry) => entry[metric.key] !== null)
-      .map((entry) => ({ t: Date.parse(entry.recorded_at), v: entry[metric.key] as number })),
+      .map((entry) => ({
+        t: Date.parse(entry.recorded_at),
+        v: toDisplay(entry[metric.key] as number, metric.quantity, system),
+      })),
   };
 }
 
@@ -29,6 +33,7 @@ function Swatch({ color }: { color: string }) {
 }
 
 function SummaryTile({ metric, series }: { metric: MetricConfig; series: ChartSeries }) {
+  const unit = series.unit;
   const points = series.points;
   const latest = points.at(-1);
   const change = points.length > 1 ? points[points.length - 1].v - points[0].v : null;
@@ -40,12 +45,12 @@ function SummaryTile({ metric, series }: { metric: MetricConfig; series: ChartSe
         {metric.label}
       </p>
       <p className="mt-1 text-2xl font-bold text-slate-900">
-        {latest ? `${formatValue(latest.v)} ${metric.unit}` : "—"}
+        {latest ? `${formatValue(latest.v)} ${unit}` : "—"}
       </p>
       <p className="mt-0.5 text-xs text-slate-500">
         {change === null
           ? `${points.length} entr${points.length === 1 ? "y" : "ies"}`
-          : `${change > 0 ? "▲ +" : change < 0 ? "▼ " : ""}${formatValue(Math.round(change * 10) / 10)} ${metric.unit} since first log`}
+          : `${change > 0 ? "▲ +" : change < 0 ? "▼ " : ""}${formatValue(Math.round(change * 10) / 10)} ${unit} since first log`}
       </p>
     </div>
   );
@@ -53,6 +58,7 @@ function SummaryTile({ metric, series }: { metric: MetricConfig; series: ChartSe
 
 export default function MonitoringPage() {
   const { user } = useAuth();
+  const system = useUnitSystem();
   const [entries, setEntries] = useState<Measurement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -68,8 +74,8 @@ export default function MonitoringPage() {
   }, [user?.role]);
 
   const series = useMemo(
-    () => METRICS.map((metric) => ({ metric, series: toSeries(metric, entries) })),
-    [entries],
+    () => METRICS.map((metric) => ({ metric, series: toSeries(metric, entries, system) })),
+    [entries, system],
   );
   const tracked = series.filter(({ series: s }) => s.points.length > 0);
 
@@ -163,7 +169,7 @@ export default function MonitoringPage() {
               <section key={metric.key} className="card">
                 <h3 className="flex items-center gap-2 font-semibold">
                   <Swatch color={metric.color} />
-                  {metric.label} <span className="font-normal text-slate-500">({metric.unit})</span>
+                  {metric.label} <span className="font-normal text-slate-500">({unitLabel(metric.quantity, system)})</span>
                 </h3>
                 <div className="mt-3">
                   <LineChart ariaLabel={`${metric.label} over time`} height={200} series={[s]} />
@@ -195,7 +201,7 @@ export default function MonitoringPage() {
                       {METRICS.map((metric) => (
                         <td key={metric.key} className="whitespace-nowrap py-2 pr-4 text-right text-slate-800">
                           {entry[metric.key] !== null
-                            ? `${formatValue(entry[metric.key] as number)} ${metric.unit}`
+                            ? format(entry[metric.key], metric.quantity, system)
                             : <span className="text-slate-300">—</span>}
                         </td>
                       ))}

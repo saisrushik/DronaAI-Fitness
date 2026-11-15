@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { APP_NAME } from "../config/brand";
 import { useAuth, type Role } from "../context/AuthContext";
+import { countries } from "../lib/profileOptions";
 
 const PASSWORD_HINT =
   "At least 8 characters, with an uppercase letter, a number and a special character.";
@@ -23,11 +24,7 @@ const emptyForm = {
   confirm: "",
   date_of_birth: "",
   gender: "male",
-  height_cm: "",
-  weight_kg: "",
-  waist_cm: "",
-  neck_cm: "",
-  hip_cm: "",
+  country: "IN",
 };
 
 export default function RegisterPage() {
@@ -62,14 +59,10 @@ export default function RegisterPage() {
         ...(isCustomer && {
           date_of_birth: form.date_of_birth,
           gender: form.gender,
-          height_cm: Number(form.height_cm),
-          weight_kg: Number(form.weight_kg),
-          waist_cm: Number(form.waist_cm),
-          neck_cm: Number(form.neck_cm),
-          ...(form.hip_cm ? { hip_cm: Number(form.hip_cm) } : {}),
+          country: form.country,
         }),
       });
-      // New accounts always start with an incomplete profile.
+      // New accounts always start with an incomplete profile, which opens onboarding.
       navigate("/profile", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");
@@ -78,38 +71,13 @@ export default function RegisterPage() {
     }
   };
 
-  const numberField = (
-    field: keyof typeof form,
-    label: string,
-    placeholder: string,
-    { min, max, required = true }: { min: number; max: number; required?: boolean },
-  ) => (
-    <div>
-      <label className="label" htmlFor={field}>
-        {label}
-      </label>
-      <input
-        id={field}
-        type="number"
-        step="0.1"
-        min={min}
-        max={max}
-        required={required}
-        value={form[field]}
-        onChange={(e) => update(field, e.target.value)}
-        className="input"
-        placeholder={placeholder}
-      />
-    </div>
-  );
-
   return (
     <div className="mx-auto max-w-2xl">
       <div className="card">
         <h1 className="text-2xl font-bold">Create your account</h1>
         <p className="mt-1 text-sm text-slate-600">
           {isCustomer
-            ? "We use your measurements to calculate your health metrics."
+            ? "Start with the basics — we'll ask about your body, goals and training next."
             : "Tell us who you are — you'll add your coaching details next."}
         </p>
 
@@ -215,24 +183,26 @@ export default function RegisterPage() {
                 </div>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                {numberField("height_cm", "Height (cm)", "178", { min: 100, max: 250 })}
-                {numberField("weight_kg", "Weight (kg)", "82.5", { min: 30, max: 250 })}
+              <div>
+                <label className="label" htmlFor="country">
+                  Country
+                </label>
+                <select
+                  id="country"
+                  value={form.country}
+                  onChange={(e) => update("country", e.target.value)}
+                  className="input"
+                >
+                  {countries.map((country) => (
+                    <option key={country.value} value={country.value}>
+                      {country.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-slate-500">
+                  Sets which BMI standard is shown first: Asian cut-offs for India, WHO elsewhere.
+                </p>
               </div>
-
-              <div className="grid gap-4 sm:grid-cols-3">
-                {numberField("waist_cm", "Waist (cm)", "92", { min: 40, max: 200 })}
-                {numberField("neck_cm", "Neck (cm)", "39", { min: 20, max: 60 })}
-                {numberField("hip_cm", "Hip (cm)", "96", {
-                  min: 40,
-                  max: 200,
-                  required: false,
-                })}
-              </div>
-              <p className="-mt-2 text-xs text-slate-500">
-                Waist, neck and hip are used for your body fat estimate. Hip is only needed for
-                women.
-              </p>
             </>
           )}
 

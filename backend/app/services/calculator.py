@@ -10,26 +10,39 @@ ACTIVITY_MULTIPLIERS = {
     "very_active": 1.9,
 }
 
+# Daily calorie adjustment against TDEE (BRD 4.1.4 and 5.4).
 GOAL_CALORIE_DELTA = {
-    "lose_fat": -400,
-    "build_muscle": 300,
+    "lose_fat": -400,  # middle of the 300-500 kcal deficit band
+    "lean_bulk": 250,
+    "aggressive_bulk": 500,
     "maintain": 0,
-    "improve_endurance": 100,
+    "recomp": 0,
+    "general_fitness": 0,
+    "endurance": 0,  # fuelled through extra carbs instead (see GOAL_FAT_SHARE)
+    "strength": 150,  # middle of the 100-200 kcal surplus band
 }
 
-# Protein grams per kg of body weight.
+# Protein grams per kg of body weight, mid-point of each BRD 5.5 range.
 GOAL_PROTEIN_PER_KG = {
     "lose_fat": 2.2,
-    "build_muscle": 2.0,
+    "lean_bulk": 2.0,
+    "aggressive_bulk": 2.0,
     "maintain": 1.6,
-    "improve_endurance": 1.6,
+    "recomp": 2.4,
+    "general_fitness": 1.6,
+    "endurance": 1.6,
+    "strength": 1.8,
 }
 
 # Safety floor for daily calories (BRD 5.4).
 CALORIE_FLOOR = {"male": 1500, "female": 1200, "other": 1300}
 
 FAT_CALORIE_SHARE = 0.25
+# Endurance shifts calories from fat to carbs; still inside the BRD's 20-35% fat range.
+GOAL_FAT_SHARE = {"endurance": 0.20}
 MIN_FAT_PER_KG = 0.8
+# Energy in one kilogram of body weight change, the usual rule of thumb.
+KCAL_PER_KG = 7700
 
 HEART_RATE_ZONES = [
     ("Zone 1 — Recovery", 0.50, 0.60),
@@ -167,16 +180,27 @@ def heart_rate_zones(age: int) -> dict:
 
 
 def calculate_targets(
-    weight_kg: float, height_cm: float, age: int, gender: str, activity_level: str, goal: str
+    weight_kg: float,
+    height_cm: float,
+    age: int,
+    gender: str,
+    activity_level: str,
+    goal: str,
+    adjustment: int = 0,
 ) -> dict:
-    """Flat calorie/macro targets used by the plan generator."""
+    """Flat calorie/macro targets used by the plan generator.
+
+    `adjustment` is the coach's correction from weekly reviews; the safety floor still wins.
+    """
     bmr = calculate_bmr(weight_kg, height_cm, age, gender)
     tdee = calculate_tdee(bmr, activity_level)
     floor = CALORIE_FLOOR.get(gender, 1300)
-    calories = max(floor, round(tdee + GOAL_CALORIE_DELTA.get(goal, 0)))
+    goal_delta = GOAL_CALORIE_DELTA.get(goal, 0)
+    calories = max(floor, round(tdee + goal_delta + adjustment))
 
     protein_g = round(weight_kg * GOAL_PROTEIN_PER_KG.get(goal, 1.6))
-    fat_g = round(max(calories * FAT_CALORIE_SHARE / 9, weight_kg * MIN_FAT_PER_KG))
+    fat_share = GOAL_FAT_SHARE.get(goal, FAT_CALORIE_SHARE)
+    fat_g = round(max(calories * fat_share / 9, weight_kg * MIN_FAT_PER_KG))
     carbs_g = max(0, round((calories - protein_g * 4 - fat_g * 9) / 4))
 
     return {
@@ -188,7 +212,15 @@ def calculate_targets(
         "carbs_g": carbs_g,
         "fat_g": fat_g,
         "calorie_floor_applied": calories == floor,
+        "goal_delta": goal_delta,
+        "adjustment": adjustment,
+        "calorie_floor": floor,
     }
+
+
+def expected_weekly_change_kg(goal: str) -> float:
+    """Weight change per week the goal's calorie delta should produce (~7700 kcal per kg)."""
+    return round(GOAL_CALORIE_DELTA.get(goal, 0) * 7 / KCAL_PER_KG, 2)
 
 
 def calculate_metrics(
@@ -202,17 +234,46 @@ def calculate_metrics(
     waist_cm: float | None = None,
     neck_cm: float | None = None,
     hip_cm: float | None = None,
+    country: str = "IN",
+    adjustment: int = 0,
 ) -> dict:
     """Everything shown on the health metrics dashboard."""
-    targets = calculate_targets(weight_kg, height_cm, age, gender, activity_level, goal)
+    targets = calculate_targets(
+        weight_kg, height_cm, age, gender, activity_level, goal, adjustment
+    )
     bmi = targets["bmi"]
     body_fat = calculate_body_fat(gender, height_cm, waist_cm, neck_cm, hip_cm)
 
     return {
+        # The numbers each formula used, so the UI can explain every result (FR-8.1).
+        "inputs": {
+            "weight_kg": weight_kg,
+            "height_cm": height_cm,
+            "age": age,
+            "gender": gender,
+            "activity_level": activity_level,
+            "activity_multiplier": ACTIVITY_MULTIPLIERS.get(activity_level, 1.2),
+            "goal": goal,
+            "protein_per_kg": GOAL_PROTEIN_PER_KG.get(goal, 1.6),
+            "fat_share": GOAL_FAT_SHARE.get(goal, FAT_CALORIE_SHARE),
+            "waist_cm": waist_cm,
+            "neck_cm": neck_cm,
+            "hip_cm": hip_cm,
+        },
+        "calorie_breakdown": {
+            "tdee": targets["tdee"],
+            "goal_delta": targets["goal_delta"],
+            "coach_adjustment": targets["adjustment"],
+            "floor": targets["calorie_floor"],
+            "target": targets["target_calories"],
+            "expected_weekly_change_kg": expected_weekly_change_kg(goal),
+        },
         "bmi": {
             "value": bmi,
             "who": classify_bmi_who(bmi),
             "asian": classify_bmi_asian(bmi),
+            # BRD 5.1: Indian users get the Asian cut-offs by default; both are always shown.
+            "primary": "asian" if country.upper() == "IN" else "who",
         },
         "bmr": targets["bmr"],
         "tdee": targets["tdee"],

@@ -1,9 +1,9 @@
 # Fitness Assistant — Business Requirements Document (BRD)
 
-**Version:** 1.0
-**Date:** 2026-09-04
-**Status:** Draft
-**Related Documents:** [High-Level Design](HIGH_LEVEL_DESIGN.md)
+**Version:** 1.1
+**Date:** 2026-11-15
+**Status:** Draft — partly implemented (see [section 14](#14-implementation-status))
+**Related Documents:** [High-Level Design](HIGH_LEVEL_DESIGN.md) · [Leftover work](../leftover_work.md)
 
 ---
 
@@ -153,6 +153,22 @@ The HLD is a living reference; this BRD is the source of truth for **what** the 
 | `medical_conditions` | array | e.g., `hypertension`, `pcos`, `thyroid`, `asthma` — triggers medical disclaimer |
 | `stress_level` | enum | `low`, `medium`, `high` | Affects training volume recommendations |
 
+Implemented `medical_conditions` values: `hypertension`, `diabetes`, `heart_condition`, `pcos`, `thyroid`, `asthma`, `pregnancy`, `other`. Any declared condition adds a "check with your doctor" note to every generated plan. High stress removes one set from every exercise.
+
+#### 4.1.7 Workout Preferences
+Collected in the final onboarding step (FR-1.5).
+
+| Attribute | Type | Values | Effect on the workout plan |
+|---|---|---|---|
+| `training_experience` | enum | `beginner`, `intermediate`, `advanced` | Beginner: one set fewer per exercise; advanced: one set more. |
+| `training_location` | enum | `gym`, `home` | Home swaps gym lifts for bodyweight and resistance-band equivalents. |
+| `training_days_per_week` | int | 2–6 | Picks that many of the goal's sessions (repeating them if needed) and spreads them across the week. |
+
+#### 4.1.8 Display Preferences
+| Attribute | Type | Values | Notes |
+|---|---|---|---|
+| `unit_system` | enum | `metric`, `imperial` | Per account. Changes how weights (kg ↔ lb) and lengths (cm ↔ ft/in, in) are shown and entered (FR-2.12). Data is always stored and calculated in metric. |
+
 ---
 
 ## 5. Fitness & Nutrition Calculators
@@ -206,6 +222,10 @@ Uses the activity multipliers from section 4.1.3.
 - Never recommend below **1200 kcal** for women or **1500 kcal** for men.
 - Never recommend more than **1 kg/week loss** or **0.5 kg/week gain**.
 - Show medical disclaimer if calculated deficit exceeds 750 kcal/day.
+
+**Implemented values** for goals not listed above: `endurance` TDEE (extra calories come from carbs, with fat at 20% instead of 25%); `strength` TDEE + 150. `lose_fat` uses TDEE − 400, the middle of the 300–500 band.
+
+**Coach adjustment (FR-5.7):** the final target is TDEE + goal adjustment + the coach's accumulated weekly-review adjustment. The coach adjustment is capped at ±500 kcal/day and resets when the customer changes goal. The safety floors above still apply.
 
 ### 5.5 Macronutrient Split
 
@@ -456,6 +476,24 @@ Lunch (1:00 PM) — 650 kcal
 | FR-5.8 | System adapts workout progression based on logged performance. | Should |
 | FR-5.9 | System sends optional reminder notifications (email or in-app). | Should |
 
+#### 7.5.1 Weekly Review Rules (FR-5.6, FR-5.7)
+
+Implemented as follows. The product is coach-led, so the system recommends and the coach decides.
+
+| Rule | Value |
+|---|---|
+| Review period | The 7 days ending yesterday. |
+| When a review is created | 7 days after the previous review, or after the customer's first log, as soon as the customer logs something or their coach opens their page. No scheduled job is needed. |
+| Minimum data | At least 3 days with a check-in or weigh-in in the period; otherwise the review waits. |
+| Contents | Days logged, workout adherence (completed vs planned sessions from the accepted workout plan), meal adherence (meals marked "followed plan"), average mood, energy, soreness and sleep, and the weekly weight trend. |
+| Weight trend | (last weigh-in − first weigh-in) scaled to a week. The first weigh-in may come from up to 7 days before the period; the two must be at least 4 days apart. |
+| Expected change | Goal calorie adjustment × 7 ÷ 7700 kcal per kg (e.g. lose fat ≈ −0.36 kg/week, lean bulk ≈ +0.23 kg/week). |
+| Recommendation | No change when within ±0.25 kg/week of the expected rate. Otherwise (expected − actual) × 7700 ÷ 7, rounded to 50 kcal and capped at ±200 kcal per review and ±500 kcal in total. |
+| Safety overrides | Losing more than 1 kg/week → +200 kcal; gaining more than 0.5 kg/week → −200 kcal, regardless of goal. |
+| Adherence gate | If fewer than 70% of logged meals followed the plan, no calorie change is suggested; the customer is asked to follow the plan more closely first. |
+| Coach decision | The coach applies or dismisses the suggestion. Only the newest open review can be applied, and a goal change retires any pending suggestion along with the adjustment so far. Applying a suggestion changes the calorie target immediately and prompts the coach to regenerate the diet plan. |
+| Notifications | The customer and coach are told when a review is ready; the customer is told when the coach applies an adjustment. |
+
 ### 7.6 AI Chat Assistant
 
 | ID | Requirement | Priority |
@@ -544,7 +582,7 @@ Lunch (1:00 PM) — 650 kcal
 | Q-1 | Should we integrate with Google Fit / Apple Health in MVP? | Product | Open |
 | Q-2 | Should the AI chat assistant remember conversations across sessions? | Product | Open |
 | Q-3 | What is the primary language for launch — English only or English + Hindi? | Product | Open |
-| Q-4 | Should we offer a "coach review" feature where a human reviews the AI plan? | Product | Open |
+| Q-4 | Should we offer a "coach review" feature where a human reviews the AI plan? | Product | **Resolved:** yes. The product is coach-led: coaches generate, edit and approve plans, and apply weekly-review calorie adjustments. |
 | Q-5 | Are we sourcing exercise videos or just descriptions in MVP? | Product | Open |
 
 ---
@@ -554,6 +592,24 @@ Lunch (1:00 PM) — 650 kcal
 | Version | Date | Author | Changes |
 |---|---|---|---|
 | 1.0 | 2026-09-04 | Fitness Assistant Team | Initial draft |
+| 1.1 | 2026-11-15 | Fitness Assistant Team | Workout and display preferences (4.1.7–4.1.8); implemented calorie values and coach adjustment (5.4); weekly review rules (7.5.1); Q-4 resolved; implementation status (14) |
+
+---
+
+## 14. Implementation Status
+
+As of 2026-11-15. Remaining items are tracked in [leftover_work.md](../leftover_work.md).
+
+| Area | Status |
+|---|---|
+| 7.1 Onboarding & profile | **Done:** FR-1.1, 1.3 (access + rotating refresh tokens), 1.5 (step-by-step wizard), 1.6, 1.7, 1.8 (coach told and offered regeneration), 1.9 (JSON export), 1.10 (account deletion). **Not started:** FR-1.4 password reset. **Dropped:** FR-1.2 email verification (the app sends no email). |
+| 7.2 Calculators | **Done:** FR-2.1 to 2.12, including the dedicated My Stats page (2.11) and metric/imperial units (2.12). |
+| 7.3 Workout plans | **Partly done:** rule-based plans for all 8 goals, filtered by injury (FR-3.1, 3.3, 3.7). Every generated plan is kept (FR-3.10), but edits overwrite a plan in place. Warm-up and cool-down, rest periods, progression, exercise library and extra plan types are open. |
+| 7.4 Diet plans | **Partly done:** weekly plans matching calorie and macro targets, diet type and allergens (FR-4.1, 4.2, 4.5, 4.6, 4.10). Every generated plan is kept (FR-4.12), but meal edits overwrite it in place. Indian regional cuisine and portion units are open. |
+| 7.5 Progress & adaptation | **Done:** FR-5.1, 5.3 to 5.7. **Partly done:** FR-5.2 (planned exercises are ticked off; sets, reps and weights aren't logged). **Not started:** FR-5.8 automatic workout progression, FR-5.9 reminders. |
+| 7.6 AI chat assistant | Not started (UI shell only). |
+| 7.7 Safety | **Done:** FR-7.1, 7.4 (disclaimer accepted at sign-up and again when accepting each plan), 7.6. **Partly done:** FR-7.2 (body-part exclusions, not yet severity-aware), FR-7.3 (disclaimer at sign-up, plan approval, and on plans when conditions are declared). **Not started:** FR-7.5, 7.7. |
+| 7.8 Explainability | **Done:** FR-8.1 ("How this is calculated" on every calculator result). **Partly done:** plan notes explain exclusions and adjustments, but per-exercise and per-meal rationale (FR-8.2 to 8.4) is open. |
 
 ---
 

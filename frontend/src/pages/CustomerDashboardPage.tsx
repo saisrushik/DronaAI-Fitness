@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
+import { labelFor, type Injury } from "../lib/profileOptions";
+import { formatWeight, useUnitSystem } from "../lib/units";
 
 export interface CustomerSummary {
   id: string;
@@ -10,6 +12,7 @@ export interface CustomerSummary {
   date_of_birth: string | null;
   age: number | null;
   gender: string | null;
+  country: string;
   height_cm: number | null;
   weight_kg: number | null;
   waist_cm: number | null;
@@ -18,20 +21,21 @@ export interface CustomerSummary {
   activity_level: string | null;
   primary_goal: string | null;
   diet_type: string | null;
+  budget_level: string | null;
   dietary_preferences: string[] | null;
-  health_injury_history: string[] | null;
+  medical_conditions: string[] | null;
+  stress_level: string | null;
+  injuries: Injury[] | null;
+  training_experience: string | null;
+  training_location: string | null;
+  training_days_per_week: number | null;
+  profile_updated_at: string | null;
+  calorie_adjustment: number;
   bmi: number | null;
   workout_plan_count: number;
   diet_plan_count: number;
   pending_requests: number;
 }
-
-const goalLabels: Record<string, string> = {
-  lose_fat: "Lose fat",
-  build_muscle: "Build muscle",
-  maintain: "Maintain",
-  improve_endurance: "Endurance",
-};
 
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
@@ -43,6 +47,7 @@ function Stat({ label, value }: { label: string; value: string | number }) {
 }
 
 export default function CustomerDashboardPage() {
+  const system = useUnitSystem();
   const [customers, setCustomers] = useState<CustomerSummary[]>([]);
   const [shareCode, setShareCode] = useState("");
   const [error, setError] = useState("");
@@ -144,7 +149,7 @@ export default function CustomerDashboardPage() {
                   </div>
                   {customer.primary_goal && (
                     <span className="shrink-0 rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
-                      {goalLabels[customer.primary_goal] ?? customer.primary_goal}
+                      {labelFor("goal", customer.primary_goal)}
                     </span>
                   )}
                 </div>
@@ -157,7 +162,7 @@ export default function CustomerDashboardPage() {
                     </div>
                     <div className="rounded-lg bg-slate-50 py-2">
                       <dt className="text-xs text-slate-500">Weight</dt>
-                      <dd className="font-semibold">{customer.weight_kg} kg</dd>
+                      <dd className="font-semibold">{formatWeight(customer.weight_kg, system)}</dd>
                     </div>
                     <div className="rounded-lg bg-slate-50 py-2">
                       <dt className="text-xs text-slate-500">BMI</dt>

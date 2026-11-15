@@ -5,12 +5,20 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_customer
-from app.db.models import Customer, ProgressLog, WorkoutDietPlan
+from app.api.deps import get_current_customer, get_current_user
+from app.db.models import Customer, ProgressLog, User, WeeklyReview, WorkoutDietPlan
 from app.db.session import get_db
-from app.schemas.user import ExerciseToggle, ProgressLogResponse, ProgressLogUpsert
+from app.schemas.user import (
+    ExerciseToggle,
+    ProgressLogResponse,
+    ProgressLogUpsert,
+    WeeklyReviewResponse,
+)
+from app.services.weekly_review import ensure_weekly_review
 
 router = APIRouter(prefix="/progress", tags=["progress"])
+
+REVIEWS_SHOWN = 12
 
 
 def _check_date(log_date: date) -> None:
@@ -89,10 +97,35 @@ async def my_progress(
     return list(result.scalars().all())
 
 
+@router.get("/reviews", response_model=list[WeeklyReviewResponse])
+async def my_reviews(
+    user: User = Depends(get_current_user),
+    customer: Customer = Depends(get_current_customer),
+    db: AsyncSession = Depends(get_db),
+) -> list[WeeklyReview]:
+    """Weekly reviews, newest first. Creates this week's review if it has become due."""
+    if await ensure_weekly_review(db, customer, user.full_name):
+        await db.commit()
+    result = await db.execute(
+        select(WeeklyReview)
+        .where(WeeklyReview.customer_id == customer.id)
+        .order_by(WeeklyReview.period_end.desc())
+        .limit(REVIEWS_SHOWN)
+    )
+    return list(result.scalars().all())
+
+
+async def _check_review(db: AsyncSession, customer: Customer, user: User) -> None:
+    """Runs after a check-in is committed, so the new log counts towards the review."""
+    if await ensure_weekly_review(db, customer, user.full_name):
+        await db.commit()
+
+
 @router.put("/{log_date}", response_model=ProgressLogResponse)
 async def save_progress(
     log_date: date,
     payload: ProgressLogUpsert,
+    user: User = Depends(get_current_user),
     customer: Customer = Depends(get_current_customer),
     db: AsyncSession = Depends(get_db),
 ) -> ProgressLog:
@@ -110,6 +143,7 @@ async def save_progress(
     log.sleep_hours = payload.sleep_hours
     log.notes = payload.notes.strip()
     await db.commit()
+    await _check_review(db, customer, user)
     await db.refresh(log)
     return log
 
@@ -118,6 +152,7 @@ async def save_progress(
 async def toggle_exercise(
     log_date: date,
     payload: ExerciseToggle,
+    user: User = Depends(get_current_user),
     customer: Customer = Depends(get_current_customer),
     db: AsyncSession = Depends(get_db),
 ) -> ProgressLog:
@@ -136,5 +171,6 @@ async def toggle_exercise(
     activities = (log.workout or {}).get("activities", [])
     _set_workout(log, planned, done, activities)
     await db.commit()
+    await _check_review(db, customer, user)
     await db.refresh(log)
     return log

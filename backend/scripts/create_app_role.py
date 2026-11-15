@@ -18,12 +18,15 @@ ROLE = "fitness_app"
 # Supabase enables row-level security on every table. Those policies exist to guard its public
 # Data API roles; our backend does its own authorization and needs to see all rows, so it
 # bypasses RLS while still being unable to change the schema.
-# The app never deletes rows, so leaked app credentials can't be used to wipe data either.
+# The app never deletes rows directly, so leaked app credentials can't be used to wipe tables.
+# The one exception is the users table: deleting an account removes that row, and foreign keys
+# cascade to the rest of the user's data (cascades run with the table owner's rights).
 STATEMENTS = [
     "ALTER ROLE {role} BYPASSRLS",
     "GRANT USAGE ON SCHEMA public TO {role}",
     "REVOKE DELETE, TRUNCATE ON ALL TABLES IN SCHEMA public FROM {role}",
     "GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO {role}",
+    "GRANT DELETE ON TABLE users TO {role}",
     "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role}",
     "ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE DELETE, TRUNCATE ON TABLES FROM {role}",
     "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE ON TABLES TO {role}",

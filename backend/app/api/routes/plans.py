@@ -6,10 +6,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.api.deps import get_current_customer
-from app.db.models import Coach, Customer, WorkoutDietPlan
+from app.api.deps import get_current_customer, get_current_user
+from app.db.models import Coach, Customer, Notification, User, WorkoutDietPlan
 from app.db.session import get_db
-from app.schemas.user import PlanResponse
+from app.schemas.user import MessageResponse, PlanResponse
+from app.services.coaching import end_coaching
 
 router = APIRouter(prefix="/plans", tags=["plans"])
 
@@ -76,3 +77,25 @@ async def my_coach(
         "years_experience": coach.years_experience,
         "bio": coach.bio,
     }
+
+
+@router.post("/my-coach/leave", response_model=MessageResponse)
+async def leave_coach(
+    user: User = Depends(get_current_user),
+    customer: Customer = Depends(get_current_customer),
+    db: AsyncSession = Depends(get_db),
+) -> MessageResponse:
+    """The customer withdraws their coach's access. They can then share their code with another."""
+    if customer.coach_id is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "You don't have a coach")
+
+    coach_id = customer.coach_id
+    coach_user_id = await db.scalar(select(Coach.user_id).where(Coach.id == coach_id))
+    await end_coaching(db, customer, coach_id, "Closed because the customer left coaching.")
+    db.add(
+        Notification(user_id=coach_user_id, message=f"{user.full_name} left your roster.")
+    )
+    await db.commit()
+    return MessageResponse(
+        message="You left your coach. Share your code with a new coach to continue."
+    )

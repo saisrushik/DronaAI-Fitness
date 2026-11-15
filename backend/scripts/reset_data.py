@@ -6,6 +6,7 @@ from sqlalchemy import delete
 
 from app.core.config import settings
 from app.db.models import (
+    AuthSession,
     BodyMeasurement,
     Coach,
     Customer,
@@ -13,6 +14,7 @@ from app.db.models import (
     Notification,
     ProgressLog,
     User,
+    WeeklyReview,
     WorkoutDietPlan,
 )
 from app.db.session import AsyncSessionLocal
@@ -21,6 +23,8 @@ from app.db.session import AsyncSessionLocal
 async def reset() -> None:
     async with AsyncSessionLocal() as db:
         for model in (
+            AuthSession,
+            WeeklyReview,
             Notification,
             CustomerRequest,
             BodyMeasurement,

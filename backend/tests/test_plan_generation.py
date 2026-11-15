@@ -15,17 +15,26 @@ def make_customer(**overrides) -> Customer:
         "height_cm": 180.0,
         "weight_kg": 85.0,
         "activity_level": "moderate",
-        "primary_goal": "build_muscle",
+        "primary_goal": "lean_bulk",
         "diet_type": "non_vegetarian",
         "dietary_preferences": [],
-        "health_injury_history": [],
+        "injuries": [],
     }
     return Customer(**{**defaults, **overrides})
 
 
+def injury(body_part: str, **details) -> dict:
+    return {"body_part": body_part, "severity": "moderate", "recovery_status": "recovering",
+            "date_of_injury": None, "notes": "", **details}
+
+
+def exercise_names(plan: dict) -> list[str]:
+    return [e["name"] for day in plan["days"] for e in day["exercises"]]
+
+
 def test_knee_injury_removes_knee_loading_exercises():
-    plan = generate_workout_plan(make_customer(health_injury_history=["knee surgery"]))
-    exercises = [e["name"] for day in plan["days"] for e in day["exercises"]]
+    plan = generate_workout_plan(make_customer(injuries=[injury("knee")]))
+    exercises = exercise_names(plan)
 
     assert "Back squat" not in exercises
     assert "Lunges" not in exercises
@@ -33,8 +42,8 @@ def test_knee_injury_removes_knee_loading_exercises():
 
 
 def test_back_injury_removes_spinal_loading_exercises():
-    plan = generate_workout_plan(make_customer(health_injury_history=["lower back pain"]))
-    exercises = [e["name"] for day in plan["days"] for e in day["exercises"]]
+    plan = generate_workout_plan(make_customer(injuries=[injury("lower_back")]))
+    exercises = exercise_names(plan)
 
     assert "Deadlift" not in exercises
     assert "Barbell row" not in exercises
@@ -42,10 +51,73 @@ def test_back_injury_removes_spinal_loading_exercises():
 
 def test_no_injuries_keeps_full_programme():
     plan = generate_workout_plan(make_customer())
-    exercises = [e["name"] for day in plan["days"] for e in day["exercises"]]
 
-    assert "Back squat" in exercises
+    assert "Back squat" in exercise_names(plan)
     assert "No exercises excluded" in plan["notes"]
+
+
+@pytest.mark.parametrize(
+    "goal",
+    ["lose_fat", "lean_bulk", "aggressive_bulk", "maintain", "recomp", "general_fitness",
+     "endurance", "strength"],
+)
+def test_every_brd_goal_gets_its_own_programme(goal):
+    plan = generate_workout_plan(make_customer(primary_goal=goal))
+    assert plan["goal"] == goal
+    assert plan["days"] and all(day["exercises"] for day in plan["days"])
+
+
+def test_strength_uses_low_reps_and_endurance_high_reps():
+    strength = generate_workout_plan(make_customer(primary_goal="strength"))
+    endurance = generate_workout_plan(make_customer(primary_goal="endurance"))
+    assert strength["days"][0]["exercises"][0]["reps"] == "3–5"
+    assert endurance["days"][0]["exercises"][0]["reps"] == "15–20"
+
+
+@pytest.mark.parametrize(
+    ("days", "weekdays"),
+    [(2, ["Monday", "Thursday"]), (6, ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"])],
+)
+def test_training_days_per_week_shapes_the_split(days, weekdays):
+    plan = generate_workout_plan(make_customer(training_days_per_week=days))
+    assert plan["days_per_week"] == days
+    assert [day["day"] for day in plan["days"]] == weekdays
+
+
+def _sets(**overrides) -> int:
+    plan = generate_workout_plan(make_customer(**overrides))
+    return plan["days"][0]["exercises"][0]["sets"]
+
+
+def test_experience_and_stress_set_the_volume():
+    # lean_bulk is 4 sets for an intermediate lifter.
+    assert _sets(training_experience="intermediate") == 4
+    assert _sets(training_experience="beginner") == 3
+    assert _sets(training_experience="advanced") == 5
+    assert _sets(training_experience="intermediate", stress_level="high") == 3
+    assert _sets(training_experience="beginner", stress_level="high", primary_goal="maintain") == 2
+
+
+def test_home_training_swaps_gym_lifts_for_bodyweight():
+    plan = generate_workout_plan(make_customer(training_location="home"))
+    exercises = exercise_names(plan)
+
+    assert "Bench press" not in exercises
+    assert "Push-ups" in exercises
+    assert "Home version" in plan["notes"]
+
+
+def test_injuries_also_filter_home_exercises():
+    plan = generate_workout_plan(
+        make_customer(training_location="home", injuries=[injury("knee")])
+    )
+    assert "Bodyweight squat" not in exercise_names(plan)
+
+
+def test_medical_conditions_add_a_disclaimer_to_both_plans():
+    customer = make_customer(medical_conditions=["hypertension"])
+    assert "high blood pressure" in generate_workout_plan(customer)["notes"]
+    assert "not medical advice" in generate_diet_plan(customer)["notes"]
 
 
 def test_weekly_diet_plan_shape():

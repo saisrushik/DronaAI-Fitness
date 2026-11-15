@@ -40,6 +40,10 @@ class User(Base):
     first_name: Mapped[str] = mapped_column(String(60), nullable=False)
     last_name: Mapped[str] = mapped_column(String(60), nullable=False, default="")
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="customer")
+    # "metric" or "imperial". Only changes how values are shown and entered; storage is metric.
+    unit_system: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="metric", server_default="metric"
+    )
 
     disclaimer_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -91,6 +95,10 @@ class Customer(Base):
     # --- Demographic ---
     date_of_birth: Mapped[date | None] = mapped_column(Date)
     gender: Mapped[str | None] = mapped_column(String(20))
+    # ISO 3166-1 alpha-2. India uses the Asian BMI cut-offs as its primary standard.
+    country: Mapped[str] = mapped_column(
+        String(2), nullable=False, default="IN", server_default="IN"
+    )
 
     # --- Physiological ---
     height_cm: Mapped[float | None] = mapped_column(Float)
@@ -103,12 +111,27 @@ class Customer(Base):
     activity_level: Mapped[str | None] = mapped_column(String(30))
     primary_goal: Mapped[str | None] = mapped_column(String(30))
     diet_type: Mapped[str | None] = mapped_column(String(30))
+    budget_level: Mapped[str | None] = mapped_column(String(10))
+    stress_level: Mapped[str | None] = mapped_column(String(10))
+
+    # --- Workout preferences ---
+    training_experience: Mapped[str | None] = mapped_column(String(20))
+    training_location: Mapped[str | None] = mapped_column(String(10))
+    training_days_per_week: Mapped[int | None] = mapped_column(Integer)
 
     # --- Variable-length lists, stored as JSONB ---
     dietary_preferences: Mapped[list[str] | None] = mapped_column(JsonList)
-    health_injury_history: Mapped[list[str] | None] = mapped_column(JsonList)
+    medical_conditions: Mapped[list[str] | None] = mapped_column(JsonList)
+    # [{"body_part", "severity", "recovery_status", "date_of_injury", "notes"}]
+    injuries: Mapped[list[dict] | None] = mapped_column(JsonList)
 
     profile_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Set when a completed profile changes, so the coach can tell which plans are out of date.
+    profile_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # kcal/day the coach added or removed after weekly reviews (FR-5.7). Reset on goal change.
+    calorie_adjustment: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
 
     user: Mapped[User] = relationship(back_populates="customer")
     coach: Mapped[Coach | None] = relationship(back_populates="customers")
@@ -143,8 +166,9 @@ class WorkoutDietPlan(Base):
     customer_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("customers.id", ondelete="CASCADE"), index=True, nullable=False
     )
-    coach_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("coaches.id", ondelete="CASCADE"), index=True, nullable=False
+    # Cleared if the coach deletes their account; the customer keeps the plan.
+    coach_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("coaches.id", ondelete="SET NULL"), index=True
     )
 
     plan_type: Mapped[str] = mapped_column(String(10), nullable=False)  # "workout" | "diet"
@@ -169,8 +193,9 @@ class CustomerRequest(Base):
     customer_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("customers.id", ondelete="CASCADE"), index=True, nullable=False
     )
-    coach_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("coaches.id", ondelete="CASCADE"), index=True, nullable=False
+    # Cleared if the coach deletes their account; the customer keeps their request history.
+    coach_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("coaches.id", ondelete="SET NULL"), index=True
     )
     # Only meal requests point at a plan.
     plan_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -259,7 +284,56 @@ class Notification(Base):
     )
 
 
+class WeeklyReview(Base):
+    """A look back over one week of check-ins and weigh-ins (FR-5.6), with an optional
+    calorie adjustment for the coach to apply (FR-5.7)."""
+
+    __tablename__ = "weekly_reviews"
+    # Backstop for the per-customer lock in services/weekly_review: one review per week.
+    __table_args__ = (UniqueConstraint("customer_id", "period_end"),)
+
+    id: Mapped[uuid.UUID] = _pk()
+    customer_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    period_start: Mapped[date] = mapped_column(Date, nullable=False)
+    period_end: Mapped[date] = mapped_column(Date, nullable=False)
+    # Adherence, wellness averages, weight trend and expected rate; see services/weekly_review.
+    stats: Mapped[dict] = mapped_column(JsonList, nullable=False)
+    summary: Mapped[str] = mapped_column(String(1000), nullable=False)
+    recommended_adjustment: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # open | applied | dismissed | superseded (a newer review replaced it) | none (nothing to do)
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="open")
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class AuthSession(Base):
+    """One signed-in browser or device. Revoking it ends both its access and refresh tokens."""
+
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[uuid.UUID] = _pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    # The refresh token currently valid for this session. Rotated on every refresh.
+    refresh_jti: Mapped[str] = mapped_column(String(64), nullable=False)
+    # The token it replaced, still honoured briefly so parallel tabs refreshing at once don't
+    # look like a stolen token being replayed.
+    previous_jti: Mapped[str | None] = mapped_column(String(64))
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 __all__ = [
+    "AuthSession",
     "Base",
     "BodyMeasurement",
     "Coach",
@@ -268,5 +342,6 @@ __all__ = [
     "Notification",
     "ProgressLog",
     "User",
+    "WeeklyReview",
     "WorkoutDietPlan",
 ]

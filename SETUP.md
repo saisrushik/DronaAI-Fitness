@@ -312,6 +312,12 @@ python -m scripts.create_app_role
 It prints a connection string. Use it for `DATABASE_URL` and keep `DATABASE_URL_SYNC` pointing at
 the owner account — Alembic needs schema rights to run migrations.
 
+The role can read, insert and update every table, but can only delete from `users`. That one grant
+powers account deletion: removing the `users` row cascades to the rest of that user's data, and
+Postgres runs cascades with the table owner's rights. If the role already existed before account
+deletion was added, the `e1f3a5b7c9d2` migration grants it automatically, so there's no need to
+re-run the script.
+
 ## 2. Deploy the backend to Render
 
 1. Push the repository to GitHub.
@@ -363,7 +369,7 @@ accounts in production — they all share a published password.
 
 ## Why cookie settings matter
 
-The frontend and API sit on different domains, so the session cookie must be cross-site:
+The frontend and API sit on different domains, so the session cookies must be cross-site:
 
 | Setting | Local | Deployed |
 |---|---|---|
@@ -373,6 +379,16 @@ The frontend and API sit on different domains, so the session cookie must be cro
 With `SameSite=lax` across domains the browser silently drops the cookie and **login appears to
 succeed but every subsequent request is unauthenticated**. The blueprint sets these correctly.
 
+There are two cookies, both httpOnly:
+
+| Cookie | Lifetime | Sent to |
+|---|---|---|
+| `fitness_session` (access) | 15 minutes | Every API call |
+| `fitness_refresh` | 30 days, extended on each use | `/api/v1/auth/*` only |
+
+The frontend renews the access cookie automatically when it gets a `401`. Override the lifetimes
+with `ACCESS_TOKEN_EXPIRE_MINUTES` and `REFRESH_TOKEN_EXPIRE_DAYS` if needed.
+
 ## Post-deploy checklist
 
 | Check | Expected |
@@ -381,6 +397,7 @@ succeed but every subsequent request is unauthenticated**. The blueprint sets th
 | `https://your-api.onrender.com/api/v1/ready` | `{"status":"ready"}` |
 | Sign up a new account | Lands on the profile page, already logged in |
 | Log in, refresh the page | Still logged in |
+| Profile → **Log out on all devices** | Other browsers are signed out on their next request |
 | 11 rapid failed logins | The 11th returns `429` |
 
 > Render's free tier sleeps after 15 minutes of inactivity, so the first request after a pause

@@ -3,6 +3,8 @@ import { Link, useLocation } from "react-router-dom";
 import { useAuth, type User } from "../context/AuthContext";
 import { api } from "../lib/api";
 import { METRICS, type MetricKey } from "../lib/measurements";
+import { formatNumber, toDisplay, unitLabel, useUnitSystem } from "../lib/units";
+import { HeightInput, MeasureInput } from "./UnitInputs";
 
 const emptyValues = (): Record<MetricKey, string> => ({
   weight_kg: "",
@@ -20,6 +22,7 @@ function localNow(): string {
 
 export default function MeasurementLogCard() {
   const { user, setUser } = useAuth();
+  const system = useUnitSystem();
   const [values, setValues] = useState(emptyValues);
   const [when, setWhen] = useState(localNow);
   const [error, setError] = useState("");
@@ -78,24 +81,29 @@ export default function MeasurementLogCard() {
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           {METRICS.map((metric) => {
             const current = user?.customer?.[metric.key];
+            const id = `log-${metric.key}`;
+            const set = (v: string) => setValues((prev) => ({ ...prev, [metric.key]: v }));
+            const isHeight = metric.key === "height_cm";
             return (
-              <div key={metric.key}>
-                <label className="label flex items-center gap-1.5" htmlFor={`log-${metric.key}`}>
+              <div key={metric.key} className={isHeight && system === "imperial" ? "col-span-2 sm:col-span-1" : ""}>
+                <label className="label flex items-center gap-1.5" htmlFor={id}>
                   <span className="h-2 w-2 rounded-full" style={{ background: metric.color }} />
-                  {metric.label} ({metric.unit})
+                  {metric.label} ({isHeight && system === "imperial" ? "ft, in" : unitLabel(metric.quantity, system)})
                 </label>
-                <input
-                  id={`log-${metric.key}`}
-                  type="number"
-                  inputMode="decimal"
-                  step="0.1"
-                  min={metric.min}
-                  max={metric.max}
-                  value={values[metric.key]}
-                  onChange={(e) => setValues({ ...values, [metric.key]: e.target.value })}
-                  className="input"
-                  placeholder={current ? `Now ${current}` : ""}
-                />
+                {isHeight ? (
+                  <HeightInput id={id} system={system} value={values[metric.key]} onChange={set} />
+                ) : (
+                  <MeasureInput
+                    id={id}
+                    quantity={metric.quantity}
+                    system={system}
+                    value={values[metric.key]}
+                    onChange={set}
+                    min={metric.min}
+                    max={metric.max}
+                    placeholder={current ? `Now ${formatNumber(toDisplay(current, metric.quantity, system))}` : ""}
+                  />
+                )}
               </div>
             );
           })}

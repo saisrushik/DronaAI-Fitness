@@ -8,8 +8,9 @@ import jwt
 
 from app.core.config import settings
 
-# Only session tokens are accepted; tokens issued for any other purpose are rejected.
-SESSION = "session"
+# Each token is only accepted for the purpose it was issued for.
+ACCESS = "access"
+REFRESH = "refresh"
 
 PASSWORD_RULES = (
     "Password must be at least 8 characters and include an uppercase letter, "
@@ -39,10 +40,16 @@ def validate_password(password: str) -> str:
     return password
 
 
-def create_token(subject: str, purpose: str = SESSION, expires_in: timedelta | None = None) -> str:
+def create_token(
+    subject: str,
+    purpose: str = ACCESS,
+    expires_in: timedelta | None = None,
+    **claims: str,
+) -> str:
     if expires_in is None:
         expires_in = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {
+        **claims,
         "sub": subject,
         "purpose": purpose,
         "exp": datetime.now(timezone.utc) + expires_in,
@@ -50,15 +57,19 @@ def create_token(subject: str, purpose: str = SESSION, expires_in: timedelta | N
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
-def decode_token(token: str, purpose: str = SESSION) -> str | None:
-    """Returns the subject, or None if the token is invalid, expired or the wrong purpose."""
+def decode_token(token: str, purpose: str = ACCESS) -> dict | None:
+    """Returns the claims, or None if the token is invalid, expired or the wrong purpose."""
     try:
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
     except jwt.PyJWTError:
         return None
-    if payload.get("purpose") != purpose:
+    if payload.get("purpose") != purpose or not payload.get("sub"):
         return None
-    return payload.get("sub")
+    return payload
+
+
+def new_token_id() -> str:
+    return secrets.token_urlsafe(24)
 
 
 def generate_share_code() -> str:

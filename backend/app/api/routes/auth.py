@@ -1,32 +1,59 @@
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlalchemy import func, select
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.api.deps import get_current_user
+from app.api.deps import bearer_scheme, get_current_user
 from app.core.config import settings
-from app.core.rate_limit import LOGIN_LIMIT, REGISTER_LIMIT, limiter
+from app.core.rate_limit import (
+    EXPORT_LIMIT,
+    LOGIN_LIMIT,
+    REFRESH_LIMIT,
+    REGISTER_LIMIT,
+    limiter,
+)
 from app.core.security import (
-    create_token,
+    REFRESH,
+    decode_token,
     generate_share_code,
     hash_password,
     verify_password,
 )
-from app.db.models import Coach, Customer, User
+from app.db.models import AuthSession, Coach, Customer, Notification, User
 from app.db.session import get_db
 from app.schemas.user import (
+    AccountDelete,
     AccountUpdate,
     CoachProfileUpdate,
     CustomerProfileUpdate,
     LoginRequest,
     MeResponse,
     MessageResponse,
+    PreferencesUpdate,
     RegisterRequest,
 )
+from app.services.auth_sessions import (
+    clear_auth_cookies,
+    is_active,
+    is_recent_previous,
+    revoke,
+    revoke_all,
+    rotate,
+    session_id_from_request,
+    set_auth_cookies,
+    start_session,
+)
+from app.services.coaching import end_coaching, record_profile_change
+from app.services.data_export import build_export
 from app.services.measurements import body_values, changed_values, measurement_from
 from app.services.metrics import metrics_for
+from app.services.weekly_review import supersede_open_reviews
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -43,6 +70,7 @@ def _to_me(user: User) -> MeResponse:
         last_name=user.last_name,
         full_name=user.full_name,
         role=user.role,
+        unit_system=user.unit_system or "metric",
         profile_completed=bool(profile and profile.profile_completed),
         coach=user.coach,
         customer=user.customer,
@@ -50,22 +78,44 @@ def _to_me(user: User) -> MeResponse:
     )
 
 
-def _set_session_cookie(response: Response, user_id: str) -> None:
-    response.set_cookie(
-        key=settings.COOKIE_NAME,
-        value=create_token(user_id),
-        httponly=True,
-        secure=settings.COOKIE_SECURE,
-        samesite=settings.COOKIE_SAMESITE,
-        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        path="/",
+async def _sign_in(request: Request, response: Response, db: AsyncSession, user_id) -> None:
+    """Starts a new session, ending whichever one this browser held before."""
+    await _end_browser_session(request, db)
+    session = await start_session(db, user_id)
+    await db.commit()
+    set_auth_cookies(response, session)
+
+
+async def _end_browser_session(
+    request: Request, db: AsyncSession, bearer: str | None = None
+) -> None:
+    session_id = session_id_from_request(request, bearer)
+    if session_id is None:
+        return
+    session = await db.get(AuthSession, session_id)
+    if session is not None:
+        revoke(session)
+
+
+def _session_expired() -> JSONResponse:
+    # Returned rather than raised so the cookie-clearing headers reach the browser.
+    response = JSONResponse(
+        {"detail": "Your session has expired. Please log in again."},
+        status_code=status.HTTP_401_UNAUTHORIZED,
     )
+    clear_auth_cookies(response)
+    return response
 
 
 async def _by_email(db: AsyncSession, email: str) -> User | None:
     # Older rows may have been stored with mixed case.
     result = await db.execute(select(User).where(func.lower(User.email) == email.lower()))
     return result.scalars().first()
+
+
+def _blank(value):  # type: ignore[no-untyped-def]
+    """Treats missing and empty values alike when deciding whether a profile changed."""
+    return None if value is None or value == [] or value == "" else value
 
 
 async def _reload(db: AsyncSession, user_id) -> User:
@@ -107,6 +157,7 @@ async def register(
             share_code=generate_share_code(),
             date_of_birth=payload.date_of_birth,
             gender=payload.gender,
+            country=payload.country,
             height_cm=payload.height_cm,
             weight_kg=payload.weight_kg,
             waist_cm=payload.waist_cm,
@@ -115,13 +166,12 @@ async def register(
         )
         db.add(customer)
         await db.flush()
-        # Sign-up measurements are the first point in the customer's history.
+        # Any sign-up measurements are the first point in the customer's history.
         first = measurement_from(customer, body_values(customer))
         if first is not None:
             db.add(first)
-    await db.commit()
 
-    _set_session_cookie(response, str(user.id))
+    await _sign_in(request, response, db, user.id)
     return _to_me(await _reload(db, user.id))
 
 
@@ -140,25 +190,85 @@ async def login(
     if not verify_password(payload.password, user.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Incorrect email or password")
 
-    _set_session_cookie(response, str(user.id))
+    await _sign_in(request, response, db, user.id)
     return _to_me(await _reload(db, user.id))
 
 
+@router.post("/refresh", response_model=MessageResponse)
+@limiter.limit(REFRESH_LIMIT)
+async def refresh_session(
+    request: Request, response: Response, db: AsyncSession = Depends(get_db)
+):
+    """Swaps a refresh token for a new access token, rotating the refresh token as it goes."""
+    token = request.cookies.get(settings.REFRESH_COOKIE_NAME)
+    payload = decode_token(token, REFRESH) if token else None
+    if payload is None:
+        return _session_expired()
+    try:
+        session_id = uuid.UUID(payload.get("sid", ""))
+    except (TypeError, ValueError):
+        return _session_expired()
+
+    # Locked so two tabs refreshing at the same instant are serialised: the second then sees the
+    # first one's rotation and takes the grace path instead of overwriting it.
+    session = await db.get(AuthSession, session_id, with_for_update=True)
+    if session is None or str(session.user_id) != payload["sub"] or not is_active(session):
+        return _session_expired()
+
+    jti = payload.get("jti")
+    if jti == session.refresh_jti:
+        rotate(session)
+    elif not is_recent_previous(session, jti):
+        # An already-used refresh token came back: treat it as stolen and end the session.
+        revoke(session)
+        await db.commit()
+        return _session_expired()
+
+    await db.commit()
+    set_auth_cookies(response, session)
+    return MessageResponse(message="Session refreshed.")
+
+
 @router.post("/logout", response_model=MessageResponse)
-async def logout(response: Response) -> MessageResponse:
-    response.delete_cookie(
-        key=settings.COOKIE_NAME,
-        httponly=True,
-        secure=settings.COOKIE_SECURE,
-        samesite=settings.COOKIE_SAMESITE,
-        path="/",
-    )
+async def logout(
+    request: Request,
+    response: Response,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> MessageResponse:
+    await _end_browser_session(request, db, credentials.credentials if credentials else None)
+    await db.commit()
+    clear_auth_cookies(response)
     return MessageResponse(message="Logged out.")
+
+
+@router.post("/logout-all", response_model=MessageResponse)
+async def logout_everywhere(
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MessageResponse:
+    await revoke_all(db, current_user.id)
+    await db.commit()
+    clear_auth_cookies(response)
+    return MessageResponse(message="Logged out on all devices.")
 
 
 @router.get("/me", response_model=MeResponse)
 async def read_me(current_user: User = Depends(get_current_user)) -> MeResponse:
     return _to_me(current_user)
+
+
+@router.put("/me/preferences", response_model=MeResponse)
+async def update_preferences(
+    payload: PreferencesUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MeResponse:
+    """Display settings that don't affect any calculation, such as metric or imperial units."""
+    current_user.unit_system = payload.unit_system
+    await db.commit()
+    return _to_me(await _reload(db, current_user.id))
 
 
 @router.put("/me/customer-profile", response_model=MeResponse)
@@ -171,15 +281,29 @@ async def update_customer_profile(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Customer account required")
 
     customer = current_user.customer
+    first_time = not customer.profile_completed
+    values = payload.model_dump(mode="json")
+    before_profile = {field: getattr(customer, field) for field in values}
     before = body_values(customer)
-    for field, value in payload.model_dump().items():
+    for field, value in values.items():
         setattr(customer, field, value)
     customer.profile_completed = True
+    # Review adjustments were tuned for the old goal's expected rate, so they no longer apply.
+    if not first_time and before_profile["primary_goal"] != customer.primary_goal:
+        customer.calorie_adjustment = 0
+        await supersede_open_reviews(db, customer)
 
     # Edits to measurements on the profile form also count as a new log entry.
     entry = measurement_from(customer, changed_values(before, body_values(customer)))
     if entry is not None:
         db.add(entry)
+
+    if first_time or any(
+        _blank(before_profile[field]) != _blank(value) for field, value in values.items()
+    ):
+        await record_profile_change(
+            db, customer, current_user.full_name, first_time=first_time
+        )
 
     await db.commit()
     return _to_me(await _reload(db, current_user.id))
@@ -259,6 +383,7 @@ async def update_account(
                     share_code=generate_share_code(),
                     gender=payload.gender,
                     date_of_birth=payload.date_of_birth,
+                    country=payload.country or "IN",
                 )
             )
 
@@ -269,14 +394,96 @@ async def update_account(
 
     # Demographics live on the profile for the account's (new) role.
     profile = user.coach if payload.role == "coach" else user.customer
+    demographics_before = (
+        (profile.gender, profile.date_of_birth, getattr(profile, "country", None))
+        if profile is not None
+        else None
+    )
     if profile is not None:
         if payload.gender is not None:
             profile.gender = payload.gender
         if payload.date_of_birth is not None:
             profile.date_of_birth = payload.date_of_birth
+    if payload.role == "customer" and user.customer is not None and payload.country:
+        user.customer.country = payload.country
+
+    # Age, gender and country feed the calculators, so the coach may need new plans.
+    customer = user.customer if payload.role == "customer" else None
+    if (
+        customer is not None
+        and customer.profile_completed
+        and demographics_before is not None
+        and demographics_before != (customer.gender, customer.date_of_birth, customer.country)
+    ):
+        await record_profile_change(db, customer, user.full_name, first_time=False)
+
+    # Other devices signed in under the old email or role must sign in again.
+    if email_changed or role_changed:
+        await revoke_all(db, user.id, keep=request.state.session_id)
 
     user_id = user.id
     await db.commit()
     # A role switch may have created a profile row the loaded user doesn't know about yet.
     db.expire_all()
     return _to_me(await _reload(db, user_id))
+
+
+@router.get("/me/export")
+@limiter.limit(EXPORT_LIMIT)
+async def export_my_data(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Everything stored about the signed-in user, as a downloadable JSON file."""
+    data = await build_export(db, current_user)
+    return JSONResponse(
+        jsonable_encoder(data),
+        headers={
+            "Content-Disposition": 'attachment; filename="dronaai-fit-my-data.json"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@router.post("/me/delete", response_model=MessageResponse)
+@limiter.limit(LOGIN_LIMIT)
+async def delete_account(
+    request: Request,
+    payload: AccountDelete,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MessageResponse:
+    """Permanently deletes the account and everything that belongs to it."""
+    if not verify_password(payload.password, current_user.password_hash):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Incorrect password")
+
+    if current_user.coach is not None:
+        # Customers keep their plans and history; they just lose access to this coach.
+        customers = await db.scalars(
+            select(Customer).where(Customer.coach_id == current_user.coach.id)
+        )
+        for customer in customers.all():
+            await end_coaching(
+                db,
+                customer,
+                current_user.coach.id,
+                "Closed because your coach deleted their account.",
+            )
+            db.add(
+                Notification(
+                    user_id=customer.user_id,
+                    message=f"{current_user.full_name} closed their account. "
+                    "Share your code with a new coach to continue.",
+                )
+            )
+        await db.flush()
+
+    # Foreign keys cascade from users to the profile, plans, logs, measurements, requests,
+    # notifications and sessions. Plans a coach wrote for others keep existing without them.
+    await db.execute(delete(User).where(User.id == current_user.id))
+    await db.commit()
+
+    clear_auth_cookies(response)
+    return MessageResponse(message="Your account and all of its data have been deleted.")

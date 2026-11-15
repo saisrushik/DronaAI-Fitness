@@ -1,57 +1,25 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import AccountEditor from "../components/AccountEditor";
-import HealthMetricsPanel from "../components/HealthMetricsPanel";
+import AccountPrivacyCard from "../components/AccountPrivacyCard";
 import MeasurementLogCard from "../components/MeasurementLogCard";
+import OnboardingWizard from "../components/OnboardingWizard";
+import {
+  ActivitySection,
+  BodySection,
+  DietSection,
+  draftFromProfile,
+  GoalSection,
+  HealthSection,
+  payloadFromDraft,
+  TrainingSection,
+  type ProfileDraft,
+  type UpdateDraft,
+} from "../components/ProfileSections";
+import UnitToggle from "../components/UnitToggle";
 import { useAuth, type User } from "../context/AuthContext";
 import { api } from "../lib/api";
-
-const activityLevels = [
-  { value: "sedentary", label: "Sedentary (little or no exercise)" },
-  { value: "light", label: "Light (1–3 days/week)" },
-  { value: "moderate", label: "Moderate (3–5 days/week)" },
-  { value: "active", label: "Active (6–7 days/week)" },
-  { value: "very_active", label: "Very active (physical job or 2x/day)" },
-];
-
-const goals = [
-  {
-    value: "lose_fat",
-    label: "Lose fat",
-    description: "Calorie deficit with high protein to keep muscle while losing fat.",
-  },
-  {
-    value: "build_muscle",
-    label: "Build muscle",
-    description: "Moderate surplus and heavier lifting to add size and strength.",
-  },
-  {
-    value: "maintain",
-    label: "Maintain weight",
-    description: "Eat around maintenance and keep your current shape and fitness.",
-  },
-  {
-    value: "improve_endurance",
-    label: "Improve endurance",
-    description: "Carb-focused fuelling with running and conditioning sessions.",
-  },
-];
-
-// Diet types from the BRD (section 4.1.5).
-const dietTypes = [
-  { value: "vegetarian", label: "Vegetarian — no meat, fish or eggs" },
-  { value: "eggetarian", label: "Eggetarian — vegetarian plus eggs" },
-  { value: "non_vegetarian", label: "Non-vegetarian — includes meat and fish" },
-  { value: "vegan", label: "Vegan — no animal products at all" },
-];
-
-/** Turns "vegan, no dairy" into ["vegan", "no dairy"]. */
-function toList(value: string): string[] {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
+import { labelFor } from "../lib/profileOptions";
 
 function ageFrom(dob: string): number {
   const birth = new Date(dob);
@@ -75,6 +43,9 @@ function AccountCard({ user }: { user: User }) {
       profile?.date_of_birth ? new Date(profile.date_of_birth).toLocaleDateString() : "—",
     ],
     ["Age", profile?.date_of_birth ? String(ageFrom(profile.date_of_birth)) : "—"],
+    ...(user.role === "customer" && user.customer
+      ? ([["Country", labelFor("country", user.customer.country)]] as [string, string][])
+      : []),
   ];
 
   return (
@@ -98,6 +69,10 @@ function AccountCard({ user }: { user: User }) {
           </div>
         ))}
       </dl>
+      <div className="mt-4 border-t border-slate-100 pt-3">
+        <p className="mb-2 text-xs font-medium text-slate-500">Units</p>
+        <UnitToggle />
+      </div>
       {editing && <AccountEditor user={user} onClose={() => setEditing(false)} />}
     </div>
   );
@@ -197,30 +172,27 @@ function CoachForm({ user }: { user: User }) {
   );
 }
 
+function FormSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-3 border-t border-slate-100 pt-5 first:border-t-0 first:pt-0">
+      <h2 className="font-semibold text-slate-900">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
 function CustomerForm({ user }: { user: User }) {
   const { setUser } = useAuth();
-  const navigate = useNavigate();
   const isFirstTime = !user.profile_completed;
-  const profile = user.customer;
+  const hasCoach = !!user.customer?.coach_id;
 
-  const [form, setForm] = useState({
-    height_cm: profile?.height_cm?.toString() ?? "",
-    weight_kg: profile?.weight_kg?.toString() ?? "",
-    waist_cm: profile?.waist_cm?.toString() ?? "",
-    neck_cm: profile?.neck_cm?.toString() ?? "",
-    hip_cm: profile?.hip_cm?.toString() ?? "",
-    activity_level: profile?.activity_level ?? "moderate",
-    primary_goal: profile?.primary_goal ?? "lose_fat",
-    diet_type: profile?.diet_type ?? "non_vegetarian",
-    dietary_preferences: profile?.dietary_preferences?.join(", ") ?? "",
-    health_injury_history: profile?.health_injury_history?.join(", ") ?? "",
-  });
+  const [draft, setDraft] = useState<ProfileDraft>(() => draftFromProfile(user.customer));
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const update = (field: keyof typeof form, value: string) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
+  const update: UpdateDraft = (field, value) => {
+    setDraft((prev) => ({ ...prev, [field]: value }));
     setStatus("");
   };
 
@@ -229,21 +201,13 @@ function CustomerForm({ user }: { user: User }) {
     setError("");
     setSaving(true);
     try {
-      const updated = await api.put<User>("/auth/me/customer-profile", {
-        height_cm: Number(form.height_cm),
-        weight_kg: Number(form.weight_kg),
-        waist_cm: form.waist_cm ? Number(form.waist_cm) : null,
-        neck_cm: form.neck_cm ? Number(form.neck_cm) : null,
-        hip_cm: form.hip_cm ? Number(form.hip_cm) : null,
-        activity_level: form.activity_level,
-        primary_goal: form.primary_goal,
-        diet_type: form.diet_type,
-        dietary_preferences: toList(form.dietary_preferences),
-        health_injury_history: toList(form.health_injury_history),
-      });
+      const updated = await api.put<User>("/auth/me/customer-profile", payloadFromDraft(draft));
       setUser(updated);
-      if (isFirstTime) navigate("/workout-plan", { replace: true });
-      else setStatus("Profile saved.");
+      setStatus(
+        hasCoach
+          ? "Profile saved. Your coach has been told about any changes so they can update your plans."
+          : "Profile saved.",
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save profile");
     } finally {
@@ -253,194 +217,39 @@ function CustomerForm({ user }: { user: User }) {
 
   return (
     <>
-      <form onSubmit={handleSubmit} className="card space-y-5 lg:col-span-2">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label className="label" htmlFor="height">
-              Height (cm)
-            </label>
-            <input
-              id="height"
-              type="number"
-              min={100}
-              max={250}
-              step="0.1"
-              required
-              value={form.height_cm}
-              onChange={(e) => update("height_cm", e.target.value)}
-              className="input"
-              placeholder="175"
-            />
+      {isFirstTime ? (
+        <OnboardingWizard user={user} />
+      ) : (
+        <form onSubmit={handleSubmit} className="card space-y-5 lg:col-span-2">
+          <FormSection title="Body measurements">
+            <BodySection draft={draft} update={update} />
+          </FormSection>
+          <FormSection title="Activity level">
+            <ActivitySection draft={draft} update={update} />
+          </FormSection>
+          <FormSection title="Primary goal">
+            <GoalSection draft={draft} update={update} />
+          </FormSection>
+          <FormSection title="Diet">
+            <DietSection draft={draft} update={update} />
+          </FormSection>
+          <FormSection title="Health & injuries">
+            <HealthSection draft={draft} update={update} />
+          </FormSection>
+          <FormSection title="Workout preferences">
+            <TrainingSection draft={draft} update={update} />
+          </FormSection>
+
+          {error && <p className="text-sm text-red-600">{error}</p>}
+
+          <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center gap-3 border-t border-slate-100 bg-white/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
+            <button type="submit" className="btn-primary" disabled={saving}>
+              {saving ? "Saving…" : "Save profile"}
+            </button>
+            {status && <span className="text-sm text-emerald-600">{status}</span>}
           </div>
-
-          <div>
-            <label className="label" htmlFor="weight">
-              Weight (kg)
-            </label>
-            <input
-              id="weight"
-              type="number"
-              min={30}
-              max={250}
-              step="0.1"
-              required
-              value={form.weight_kg}
-              onChange={(e) => update("weight_kg", e.target.value)}
-              className="input"
-              placeholder="72"
-            />
-          </div>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-3">
-          <div>
-            <label className="label" htmlFor="waist">
-              Waist (cm)
-            </label>
-            <input
-              id="waist"
-              type="number"
-              min={40}
-              max={200}
-              step="0.1"
-              value={form.waist_cm}
-              onChange={(e) => update("waist_cm", e.target.value)}
-              className="input"
-              placeholder="92"
-            />
-          </div>
-          <div>
-            <label className="label" htmlFor="neck">
-              Neck (cm)
-            </label>
-            <input
-              id="neck"
-              type="number"
-              min={20}
-              max={60}
-              step="0.1"
-              value={form.neck_cm}
-              onChange={(e) => update("neck_cm", e.target.value)}
-              className="input"
-              placeholder="39"
-            />
-          </div>
-          <div>
-            <label className="label" htmlFor="hip">
-              Hip (cm)
-            </label>
-            <input
-              id="hip"
-              type="number"
-              min={40}
-              max={200}
-              step="0.1"
-              value={form.hip_cm}
-              onChange={(e) => update("hip_cm", e.target.value)}
-              className="input"
-              placeholder="96"
-            />
-          </div>
-        </div>
-        <p className="-mt-2 text-xs text-slate-500">
-          Waist and neck power your body fat estimate. Hip is only used for women.
-        </p>
-
-        <div>
-          <label className="label" htmlFor="activity">
-            Activity level
-          </label>
-          <select
-            id="activity"
-            value={form.activity_level}
-            onChange={(e) => update("activity_level", e.target.value)}
-            className="input"
-          >
-            {activityLevels.map((level) => (
-              <option key={level.value} value={level.value}>
-                {level.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <span className="label">Primary goal</span>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {goals.map((goal) => (
-              <button
-                key={goal.value}
-                type="button"
-                onClick={() => update("primary_goal", goal.value)}
-                className={`rounded-xl border p-3 text-left transition ${
-                  form.primary_goal === goal.value
-                    ? "border-indigo-500 bg-indigo-50"
-                    : "border-slate-300 hover:bg-slate-50"
-                }`}
-              >
-                <span className="block font-medium text-slate-900">{goal.label}</span>
-                <span className="mt-1 block text-xs text-slate-600">{goal.description}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <label className="label" htmlFor="diet_type">
-            Dietary preference
-          </label>
-          <select
-            id="diet_type"
-            value={form.diet_type}
-            onChange={(e) => update("diet_type", e.target.value)}
-            className="input"
-          >
-            {dietTypes.map((diet) => (
-              <option key={diet.value} value={diet.value}>
-                {diet.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className="label" htmlFor="diet">
-            Allergies & restrictions
-          </label>
-          <input
-            id="diet"
-            value={form.dietary_preferences}
-            onChange={(e) => update("dietary_preferences", e.target.value)}
-            className="input"
-            placeholder="no dairy, peanut allergy, gluten free"
-          />
-          <p className="mt-1 text-xs text-slate-500">Separate with commas.</p>
-        </div>
-
-        <div>
-          <label className="label" htmlFor="injuries">
-            Health / injury history
-          </label>
-          <input
-            id="injuries"
-            value={form.health_injury_history}
-            onChange={(e) => update("health_injury_history", e.target.value)}
-            className="input"
-            placeholder="lower back pain, knee surgery"
-          />
-          <p className="mt-1 text-xs text-slate-500">Separate with commas.</p>
-        </div>
-
-        {error && <p className="text-sm text-red-600">{error}</p>}
-
-        <div className="flex items-center gap-3">
-          <button type="submit" className="btn-primary" disabled={saving}>
-            {saving ? "Saving…" : isFirstTime ? "Save and continue" : "Save profile"}
-          </button>
-          {status && <span className="text-sm text-emerald-600">{status}</span>}
-        </div>
-      </form>
-
+        </form>
+      )}
       <aside className="space-y-4">
         <AccountCard user={user} />
         {/* Only needed until a coach links the customer; reappears if the coach removes them. */}
@@ -456,6 +265,7 @@ function CustomerForm({ user }: { user: User }) {
             </p>
           </div>
         )}
+        <AccountPrivacyCard user={user} />
       </aside>
     </>
   );
@@ -499,8 +309,9 @@ export default function ProfilePage() {
         {isCoach ? (
           <>
             <CoachForm user={user} />
-            <aside>
+            <aside className="space-y-4">
               <AccountCard user={user} />
+              <AccountPrivacyCard user={user} />
             </aside>
           </>
         ) : (
@@ -514,22 +325,21 @@ export default function ProfilePage() {
 
       {!isCoach && !isFirstTime && <MeasurementLogCard />}
 
-      {!isCoach && (
-        <section className="card">
-          <h2 className="text-xl font-semibold">Health metrics</h2>
-          <p className="mt-1 text-sm text-slate-600">
-            Calculated from your measurements, activity level and goal.
-          </p>
-          <div className="mt-5">
-            {user.metrics ? (
-              <HealthMetricsPanel metrics={user.metrics} />
-            ) : (
-              <p className="text-sm text-slate-500">
-                Save your profile to see your full health metrics.
-              </p>
-            )}
+      {!isCoach && !isFirstTime && user.metrics && (
+        <Link
+          to="/stats"
+          className="card flex flex-wrap items-center justify-between gap-3 transition hover:border-indigo-300"
+        >
+          <div>
+            <h2 className="text-xl font-semibold">Health metrics</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              BMI {user.metrics.bmi.value} · {user.metrics.target_calories} kcal a day ·{" "}
+              {user.metrics.macros.protein_g}g protein. See all 10 calculators and how each is
+              worked out.
+            </p>
           </div>
-        </section>
+          <span className="btn-soft">Open My Stats &rarr;</span>
+        </Link>
       )}
     </div>
   );

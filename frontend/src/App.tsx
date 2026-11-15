@@ -15,6 +15,7 @@ import ProgressPage from "./pages/ProgressPage";
 import ProfilePage from "./pages/ProfilePage";
 import RegisterPage from "./pages/RegisterPage";
 import RequestsPage from "./pages/RequestsPage";
+import StatsPage from "./pages/StatsPage";
 import WorkoutPlanPage from "./pages/WorkoutPlanPage";
 
 export default function App() {
@@ -37,6 +38,7 @@ export default function App() {
               <Route path="my-coach" element={<MyCoachPage />} />
               <Route path="monitoring" element={<MonitoringPage />} />
               <Route path="progress" element={<ProgressPage />} />
+              <Route path="stats" element={<StatsPage />} />
               <Route path="requests" element={<RequestsPage />} />
             </Route>
 

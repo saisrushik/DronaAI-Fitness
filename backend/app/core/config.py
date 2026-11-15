@@ -18,10 +18,13 @@ class Settings(BaseSettings):
 
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    # Sliding: every refresh pushes the expiry out again, so active users stay signed in.
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
-    # Auth cookie. Cross-site deployments need SECURE=true and SAMESITE=none.
+    # Auth cookies. Cross-site deployments need SECURE=true and SAMESITE=none.
     COOKIE_NAME: str = "fitness_session"
+    REFRESH_COOKIE_NAME: str = "fitness_refresh"
     COOKIE_SECURE: bool = False
     COOKIE_SAMESITE: str = "lax"
 

@@ -1,5 +1,8 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { api } from "../lib/api";
+import { api, SESSION_EXPIRED_EVENT } from "../lib/api";
+import type { Injury } from "../lib/profileOptions";
+
+export type UnitSystem = "metric" | "imperial";
 
 export type Role = "customer" | "coach";
 
@@ -10,6 +13,7 @@ export interface CustomerProfile {
   date_of_birth: string | null;
   age: number | null;
   gender: string | null;
+  country: string;
   height_cm: number | null;
   weight_kg: number | null;
   waist_cm: number | null;
@@ -18,8 +22,14 @@ export interface CustomerProfile {
   activity_level: string | null;
   primary_goal: string | null;
   diet_type: string | null;
+  budget_level: string | null;
   dietary_preferences: string[] | null;
-  health_injury_history: string[] | null;
+  medical_conditions: string[] | null;
+  stress_level: string | null;
+  injuries: Injury[] | null;
+  training_experience: string | null;
+  training_location: string | null;
+  training_days_per_week: number | null;
   profile_completed: boolean;
 }
 
@@ -34,7 +44,29 @@ export interface CoachProfile {
 }
 
 export interface HealthMetrics {
-  bmi: { value: number; who: string; asian: string };
+  inputs: {
+    weight_kg: number;
+    height_cm: number;
+    age: number;
+    gender: string;
+    activity_level: string;
+    activity_multiplier: number;
+    goal: string;
+    protein_per_kg: number;
+    fat_share: number;
+    waist_cm: number | null;
+    neck_cm: number | null;
+    hip_cm: number | null;
+  };
+  calorie_breakdown: {
+    tdee: number;
+    goal_delta: number;
+    coach_adjustment: number;
+    floor: number;
+    target: number;
+    expected_weekly_change_kg: number;
+  };
+  bmi: { value: number; who: string; asian: string; primary: "who" | "asian" };
   bmr: number;
   tdee: number;
   target_calories: number;
@@ -54,6 +86,7 @@ export interface User {
   last_name: string;
   full_name: string;
   role: Role;
+  unit_system: UnitSystem;
   profile_completed: boolean;
   customer: CustomerProfile | null;
   coach: CoachProfile | null;
@@ -74,11 +107,7 @@ export interface RegisterInput {
   accepted_disclaimer: boolean;
   date_of_birth?: string;
   gender?: string;
-  height_cm?: number;
-  weight_kg?: number;
-  waist_cm?: number;
-  neck_cm?: number;
-  hip_cm?: number;
+  country?: string;
 }
 
 interface AuthContextValue {
@@ -87,6 +116,8 @@ interface AuthContextValue {
   login: (input: Credentials) => Promise<User>;
   register: (input: RegisterInput) => Promise<User>;
   logout: () => Promise<void>;
+  logoutEverywhere: () => Promise<void>;
+  deleteAccount: (password: string) => Promise<void>;
   setUser: (user: User) => void;
 }
 
@@ -105,6 +136,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
+  // Signed out elsewhere, revoked, or idle past the refresh window.
+  useEffect(() => {
+    const onExpired = () => setUser(null);
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+  }, []);
+
   const value: AuthContextValue = {
     user,
     loading,
@@ -120,6 +158,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     logout: async () => {
       await api.post("/auth/logout").catch(() => undefined);
+      setUser(null);
+    },
+    logoutEverywhere: async () => {
+      await api.post("/auth/logout-all");
+      setUser(null);
+    },
+    deleteAccount: async (password) => {
+      await api.post("/auth/me/delete", { password });
       setUser(null);
     },
     setUser,

@@ -13,6 +13,7 @@ Thumbs.db
 !.env.*.example
 passwords.md
 bugs.md
+leftover_work.md
 
 # --- Python ---
 __pycache__/

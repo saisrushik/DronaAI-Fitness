@@ -37,7 +37,8 @@ const navEntries: NavEntry[] = [
     label: "Tracking",
     role: "customer",
     items: [
-      { to: "/progress", label: "Progress Tracking", description: "Daily workouts, meals and how you feel" },
+      { to: "/stats", label: "My Stats", description: "BMI, calories, macros and all calculators" },
+      { to: "/progress", label: "Progress Tracking", description: "Daily check-ins and weekly reviews" },
       { to: "/monitoring", label: "Monitoring", description: "Body measurement trends" },
     ],
   },

@@ -18,12 +18,57 @@ from app.core.security import validate_password
 Role = Literal["customer", "coach"]
 Gender = Literal["male", "female", "other"]
 ActivityLevel = Literal["sedentary", "light", "moderate", "active", "very_active"]
-Goal = Literal["lose_fat", "build_muscle", "maintain", "improve_endurance"]
+# BRD 4.1.4.
+Goal = Literal[
+    "lose_fat",
+    "lean_bulk",
+    "aggressive_bulk",
+    "maintain",
+    "recomp",
+    "general_fitness",
+    "endurance",
+    "strength",
+]
 DietType = Literal["vegetarian", "non_vegetarian", "eggetarian", "vegan"]
 PlanType = Literal["workout", "diet"]
+BudgetLevel = Literal["low", "medium", "high"]
+StressLevel = Literal["low", "medium", "high"]
+TrainingExperience = Literal["beginner", "intermediate", "advanced"]
+TrainingLocation = Literal["gym", "home"]
+# BRD 4.1.6.
+BodyPart = Literal[
+    "knee",
+    "lower_back",
+    "upper_back",
+    "shoulder",
+    "elbow",
+    "wrist",
+    "hip",
+    "ankle",
+    "neck",
+    "other",
+]
+InjurySeverity = Literal["mild", "moderate", "severe", "chronic"]
+RecoveryStatus = Literal["recovered", "recovering", "active_pain"]
+MedicalCondition = Literal[
+    "hypertension",
+    "diabetes",
+    "heart_condition",
+    "pcos",
+    "thyroid",
+    "asthma",
+    "pregnancy",
+    "other",
+]
+# ISO 3166-1 alpha-2, e.g. "IN".
+CountryCode = Annotated[
+    str, StringConstraints(strip_whitespace=True, to_upper=True, pattern=r"^[A-Za-z]{2}$")
+]
 
 MIN_AGE = 18
 MAX_AGE = 70
+MIN_TRAINING_DAYS = 2
+MAX_TRAINING_DAYS = 6
 
 # Emails are stored lowercase so the same address can't register twice with different casing.
 Email = Annotated[EmailStr, AfterValidator(str.lower)]
@@ -45,9 +90,10 @@ class RegisterRequest(BaseModel):
     role: Role = "customer"
     accepted_disclaimer: bool = False
 
-    # Customers supply their measurements at sign-up; coaches leave these empty.
+    # Customers give their demographics at sign-up; body measurements come in onboarding.
     date_of_birth: date | None = None
     gender: Gender | None = None
+    country: CountryCode = "IN"
     height_cm: float | None = Field(default=None, ge=100, le=250)
     weight_kg: float | None = Field(default=None, ge=30, le=250)
     waist_cm: float | None = Field(default=None, ge=40, le=200)
@@ -66,16 +112,7 @@ class RegisterRequest(BaseModel):
 
         if self.role == "customer":
             missing = [
-                name
-                for name in (
-                    "date_of_birth",
-                    "gender",
-                    "height_cm",
-                    "weight_kg",
-                    "waist_cm",
-                    "neck_cm",
-                )
-                if getattr(self, name) is None
+                name for name in ("date_of_birth", "gender") if getattr(self, name) is None
             ]
             if missing:
                 raise ValueError(f"Customers must provide: {', '.join(missing)}")
@@ -102,18 +139,67 @@ class MessageResponse(BaseModel):
     message: str
 
 
+UnitSystem = Literal["metric", "imperial"]
+
+
+class PreferencesUpdate(BaseModel):
+    unit_system: UnitSystem
+
+
+class AccountDelete(BaseModel):
+    password: str = Field(min_length=1, max_length=128)
+
+
 # --- Profiles ---
+class Injury(BaseModel):
+    """One entry in the customer's injury history (BRD 4.1.6)."""
+
+    body_part: BodyPart
+    severity: InjurySeverity
+    recovery_status: RecoveryStatus
+    date_of_injury: date | None = None
+    notes: str = Field(default="", max_length=200)
+
+    @field_validator("date_of_injury")
+    @classmethod
+    def not_in_future(cls, value: date | None) -> date | None:
+        if value is not None and value > date.today():
+            raise ValueError("Date of injury can't be in the future")
+        return value
+
+    @field_validator("notes")
+    @classmethod
+    def strip_notes(cls, value: str) -> str:
+        return value.strip()
+
+
 class CustomerProfileUpdate(BaseModel):
+    # Physiology
     height_cm: float = Field(ge=100, le=250)
     weight_kg: float = Field(ge=30, le=250)
     waist_cm: float | None = Field(default=None, ge=40, le=200)
     neck_cm: float | None = Field(default=None, ge=20, le=60)
     hip_cm: float | None = Field(default=None, ge=40, le=200)
+    # Activity and goal
     activity_level: ActivityLevel
     primary_goal: Goal
+    # Diet
     diet_type: DietType
+    budget_level: BudgetLevel = "medium"
     dietary_preferences: list[ProfileNote] = Field(default=[], max_length=20)
-    health_injury_history: list[ProfileNote] = Field(default=[], max_length=20)
+    # Health
+    medical_conditions: list[MedicalCondition] = Field(default=[], max_length=8)
+    stress_level: StressLevel = "medium"
+    injuries: list[Injury] = Field(default=[], max_length=20)
+    # Workout preferences
+    training_experience: TrainingExperience = "beginner"
+    training_location: TrainingLocation = "gym"
+    training_days_per_week: int = Field(default=3, ge=MIN_TRAINING_DAYS, le=MAX_TRAINING_DAYS)
+
+    @field_validator("medical_conditions")
+    @classmethod
+    def unique_conditions(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(value))
 
 
 class CoachProfileUpdate(BaseModel):
@@ -131,6 +217,8 @@ class AccountUpdate(BaseModel):
     role: Role
     gender: Gender | None = None
     date_of_birth: date | None = None
+    # Customers only; ignored for coaches.
+    country: CountryCode | None = None
     current_password: str | None = Field(default=None, max_length=128)
 
     @model_validator(mode="after")
@@ -277,6 +365,7 @@ class CustomerProfile(BaseModel):
     date_of_birth: date | None
     age: int | None
     gender: str | None
+    country: str
     height_cm: float | None
     weight_kg: float | None
     waist_cm: float | None
@@ -285,8 +374,14 @@ class CustomerProfile(BaseModel):
     activity_level: str | None
     primary_goal: str | None
     diet_type: str | None
+    budget_level: str | None
     dietary_preferences: list[str] | None
-    health_injury_history: list[str] | None
+    medical_conditions: list[str] | None
+    stress_level: str | None
+    injuries: list[dict] | None
+    training_experience: str | None
+    training_location: str | None
+    training_days_per_week: int | None
     profile_completed: bool
 
 
@@ -309,6 +404,7 @@ class MeResponse(BaseModel):
     last_name: str
     full_name: str
     role: Role
+    unit_system: str = "metric"
     profile_completed: bool
     customer: CustomerProfile | None = None
     coach: CoachProfile | None = None
@@ -321,7 +417,7 @@ class PlanResponse(BaseModel):
 
     id: uuid.UUID
     customer_id: uuid.UUID
-    coach_id: uuid.UUID
+    coach_id: uuid.UUID | None
     plan_type: PlanType
     title: str
     content: dict | None
@@ -455,6 +551,7 @@ class CustomerSummary(BaseModel):
     date_of_birth: date | None
     age: int | None
     gender: str | None
+    country: str
     height_cm: float | None
     weight_kg: float | None
     waist_cm: float | None
@@ -463,14 +560,38 @@ class CustomerSummary(BaseModel):
     activity_level: str | None
     primary_goal: str | None
     diet_type: str | None
+    budget_level: str | None
     dietary_preferences: list[str] | None
-    health_injury_history: list[str] | None
+    medical_conditions: list[str] | None
+    stress_level: str | None
+    injuries: list[dict] | None
+    training_experience: str | None
+    training_location: str | None
+    training_days_per_week: int | None
+    # Last change the coach should consider when deciding whether to regenerate plans.
+    profile_updated_at: datetime | None
+    calorie_adjustment: int
     bmi: float | None
     workout_plan_count: int
     diet_plan_count: int
     pending_requests: int
 
 
+class WeeklyReviewResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    period_start: date
+    period_end: date
+    stats: dict
+    summary: str
+    recommended_adjustment: int
+    status: str
+    resolved_at: datetime | None
+    created_at: datetime
+
+
 class CustomerDetail(CustomerSummary):
     metrics: dict | None
     plans: list[PlanResponse]
+    reviews: list[WeeklyReviewResponse] = []

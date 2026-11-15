@@ -35,6 +35,11 @@
     @apply px-3 py-1.5 text-xs;
   }
 
+  /* Irreversible actions such as deleting an account. */
+  .btn-danger {
+    @apply btn bg-red-600 text-white hover:bg-red-700;
+  }
+
   .input {
     /* 16px on mobile stops iOS Safari from zooming in on focus. */
     @apply w-full min-w-0 rounded-lg border border-slate-300 px-3 py-2 text-base sm:text-sm

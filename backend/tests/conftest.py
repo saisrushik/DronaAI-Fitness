@@ -8,6 +8,7 @@ os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-for-tests-only")
 
 import pytest_asyncio  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
+from sqlalchemy import event  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 
 from app.db.session import Base, get_db  # noqa: E402
@@ -45,8 +46,14 @@ CUSTOMER_PROFILE = {
     "activity_level": "moderate",
     "primary_goal": "lose_fat",
     "diet_type": "non_vegetarian",
+    "budget_level": "medium",
     "dietary_preferences": [],
-    "health_injury_history": [],
+    "medical_conditions": [],
+    "stress_level": "medium",
+    "injuries": [],
+    "training_experience": "intermediate",
+    "training_location": "gym",
+    "training_days_per_week": 4,
 }
 
 
@@ -54,6 +61,13 @@ CUSTOMER_PROFILE = {
 async def client() -> AsyncGenerator[AsyncClient, None]:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    # SQLite ignores ON DELETE CASCADE / SET NULL unless asked to enforce foreign keys.
+    @event.listens_for(engine.sync_engine, "connect")
+    def _enable_foreign_keys(dbapi_connection, _record) -> None:  # type: ignore[no-untyped-def]
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

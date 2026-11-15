@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useAuth, type Role, type User } from "../context/AuthContext";
 import { api } from "../lib/api";
+import { countries } from "../lib/profileOptions";
 import Modal from "./Modal";
 
 interface Props {
@@ -19,6 +20,7 @@ export default function AccountEditor({ user, onClose }: Props) {
     role: user.role as Role,
     gender: profile?.gender ?? "",
     date_of_birth: profile?.date_of_birth ?? "",
+    country: user.customer?.country ?? "IN",
     current_password: "",
   });
   const [error, setError] = useState("");
@@ -43,6 +45,7 @@ export default function AccountEditor({ user, onClose }: Props) {
         role: form.role,
         gender: form.gender || null,
         date_of_birth: form.date_of_birth || null,
+        country: form.role === "customer" ? form.country : null,
         current_password: needsPassword ? form.current_password : null,
       });
       setUser(updated);
@@ -149,9 +152,31 @@ export default function AccountEditor({ user, onClose }: Props) {
           </div>
         </div>
         {form.role === "customer" && (
-          <p className="-mt-2 text-xs text-slate-500">
-            Gender and date of birth are used for your BMR and body fat calculations.
-          </p>
+          <>
+            <p className="-mt-2 text-xs text-slate-500">
+              Gender and date of birth are used for your BMR and body fat calculations.
+            </p>
+            <div>
+              <label className="label" htmlFor="acc-country">
+                Country
+              </label>
+              <select
+                id="acc-country"
+                value={form.country}
+                onChange={(e) => update("country", e.target.value)}
+                className="input"
+              >
+                {countries.map((country) => (
+                  <option key={country.value} value={country.value}>
+                    {country.label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-slate-500">
+                India uses the Asian BMI cut-offs first; other countries use WHO.
+              </p>
+            </div>
+          </>
         )}
 
         {roleChanged && (
